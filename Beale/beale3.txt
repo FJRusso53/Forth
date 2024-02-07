@@ -1,0 +1,147 @@
+\ string functions
+\ frank j russo
+\ version 2 . 800
+\ date 10 06 28
+variable t1
+variable t2
+variable t3
+variable string-offset
+variable string-start
+0 value str1
+0 value str2
+0 value str3
+0 value str-flag
+0 value string-count
+0 value st-pt
+0 value inl
+0 value b$
+0 value ed-pt
+\
+: instrb ( addr, l, b --- addr l) \ revised 200710
+\
+\ locate char b in string at addr of length l
+\
+   to b$ to inl to st-pt
+   st-pt inl +  to ed-pt
+   st-pt \ put starting point on stack for reference
+   begin
+	dup ed-pt = not	\ starting point = end point ?
+	if
+	   dup c@ b$ =
+	   if
+	     st-pt - st-pt swap \ calc delta from start load start address  addr l on return
+	     1
+	   else
+	     1+ \ increment \ advance address pointer
+	     0
+	   endif
+	else
+	   drop st-pt 0 1	\ end of string reached restore starting point and 0 length
+	endif
+   until
+;
+: -instrb   \ (addr1 n1 b -- addr1 n2)  \ backward search
+t1 ! dup t2 ! -1 t3 ! 1- + \ t1 holds byte to search for  t2 hold string count  t3 index thru string
+begin
+	dup 1 t3 +! t3 @ - c@ t1 @ = t3 @ t2 @ > or
+until
+t3 @
+\ returns with original address and an offset into the string
+;
+: strend  \ (addr1 n1 -- addr1 n2)
+0 to str-flag
+t2 ! t2 @ to string-count
+to str1 str1 to str2
+0 t1 !
+begin
+	str1 c@ dup 32 = swap dup 13 = swap 9 = or or
+	if
+	  1 to str-flag
+	else
+	  1  +to str1
+	 -1  to string-count
+	then
+1 t1 +!
+str-flag string-count 0= or
+until
+str2 t1 @ 1 -
+\ returns with original address and an offset into the string
+;
+: strndx \ (add1 len1 addr2 len2 --- addr, len, offset )
+\ searches in string addr1 for string addr2 rtns offset if found else 0
+
+t2 ! swap t3 ! to str2 to str1 str1 to str3 0 t1 !
+t1 @ t2 @ - t1 ! 0 string-offset ! 0 string-start !
+
+begin
+	t2 @ str2 0 to str-flag
+
+	t2 @ 0 string-offset @ string-start !
+	do
+		dup c@ str1 c@ =
+
+		if
+		   1 +to str1 1 + 1 to str-flag
+		   swap 1 - swap
+		else
+		   0 to str-flag leave
+		then
+
+	loop 	\ t2 > 0 and flag
+
+	1 string-offset +!
+	2drop 1 +to str1 1 t1 +! t1 @ t3 @ >
+	str-flag or
+until \ t1 = 0 or flag
+str3 t3 @
+str-flag
+if string-start @ 1 + else 0 then
+;
+: strcat \ (add1 len1 addr2 len2 --- )
+\ concatenate 2 strings add1 len1 addr2 len2
+\ moves len1 bytes from addr1 to the end of addr2
++ \ advances to end of receiving address
+swap cmove
+;
+: strcmp \ (add1 len1 addr2 len2 --- f )
+\ compares 2 strings add1 len1 addr2 len2
+\ returns non zero for a match zero no match
+t1 ! swap t2 ! 0 t3 !
+to str2 to str1
+t1 @ t2 @ =
+if
+  t1 0 do
+	 str1 c@ str2 c@ =
+	 if
+	  1 +to str1
+	  1 +to str2
+	  1 t3 +!
+         else leave
+	 then
+      loop
+  t3 @ t2 @ =
+  if -1 else 0 then
+else 0
+then
+;
+: up-case ( addr len -- )
+0 do
+	dup c@ dup 96 >
+	  if 123 <
+	     if
+		dup c@ 95 and over c!
+	     then
+	  else drop
+	  then
+1 +
+loop
+drop
+;
+\
+: >string ( n a -- )
+\ converts numbers to counted string for output to a file
+\ for string to number use: s" 1234" (number?) (str len -- n 0 ior)
+ >r dup >r abs s>d <# #s r> sign #>
+ r@ char+ swap dup >r cmove r> r> c!
+;
+\

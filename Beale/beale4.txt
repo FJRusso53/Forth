@@ -1,0 +1,88 @@
+retiree bye cancel conceal painter planting 
+plantings programing programmer
+pot pothead insured insurer engineer engineered
+how long was she planning to leave him this way ? was it even possible for her to
+wake him she would jostled him after he collapsed to the ground while trying to
+move him into a more comfortable position  and he had not stirred  she could cut
+the vine and sever the connection but doing so might be as damaging to him as
+abruptly severing mia connection with meno had been to mia no she did not dare risk it
+so the answer was as long as it took she would wait did not mean she had to like it
+the wind picked up   raising goosebumps on her arms she crossed them over her chest
+this email message including all attachments   is for the sole use of the intended recipients and may contain 
+personal information under general dynamics policy and or legally privileged and confidential information   
+any personal information can be accessed only by authorized personnel of general dynamics and it is approved service 
+providers and may be used only as permitted by general dynamics and its policies contractual restrictions apply to third parties
+if you are not an intended recipient you are hereby notified that you have either received this message in error or through interception   and that any review use distribution copying or disclosure of this message or its attachments is strictly prohibited and is 
+subject to criminal and civil penalties all personal messages express solely the senders views and not those of
+gulfstream aerospace corporation
+if you received this message in error please contact the sender by reply email and destroy all copies of the original message
+not deliberately there was a lot of leakage from everyone when we first set up the
+noesis she did not mean to reveal any private information the noesis was
+what he and the other prevos dubbed the quantum connection that existed between
+them for it went beyond any existing form of communication network or data
+transfer all the way to the cusp of consciousness sharing
+i am sure she did not abigail sighed and turned away from the plaque 
+enough wallowing it is time to let jules rest and for us to get back to work
+he ceded to her urging and fell in beside her as they strode toward the entrance
+the clack clack of her heels on the marble floor echoed through the long
+hallway like bells tolling an elegy for the dead who surrounded them
+finally he spoke just to drown out the unknown location
+it is time to wake up mia
+a wispy murmur in the blackness blackness where before there was only
+nothingness it was dark inky and thick but there now existed the palpable sense of tangibility
+she gasped in alarm  but no sound came out of her throat   where am i ? she
+shouted  but no words made it past her lips it is all right mia you are safe
+the faint memory of a nanosecond of searing pain cleaving through her brain haunted
+the edges of her consciousness am i dead ?
+no you are very much alive   you were sick   but youre better now
+she tried to blink  but there was no
+as if the lashes were glued together   her eyes watered it stung but after
+considerable coaxing her eyelids opened a sliver  light seeped in through a
+hazy  glycerin coated filter  yet even with the haze her irises recoiled
+forcing her lids closed
+a little daunted she paused to take stock of her situation in other ways   she
+felt cool fabric beneath her palms and softness beneath her head   evidence she
+lay on a bed   not surprising   now that she listened more closely   there were
+noises   but nothing noteworthy   merely the sounds of living  
+she steeled herself and tried again   forcing her lids open and blinking rapidly to
+try to clear the gooey haze  
+it was so damn bright   but gradually blurry images solidified   the rail of a
+hospital bed ; a long window to her left ; beyond the bed   a closed door  
+as the harshness of the real world came
+disconnect from non-existing homegroup if you have used it   frank   you probably do not need to worry about this
+2 1  all pc's   check network profile and network discovery and share settings
+sometimes this selection to change between private and public network profile is missing from settings / networks page   in that case profile must change by powershell   right click windows icon ( start button ) and open powershell ( admin ) and use following commands to get interface index number and change profile to private ( or public )   get - net connection profile
+set - net connection profile - interface index < index number > - network category private
+2 2  all pc ' s  check network discovery and share settings
+3  all pc ' s  set start type to automatic and start following services that allow pc ' s to be visible on network   ( reboot )
+push win key and type " services "   locate these services  
+- function discovery provider host
+- function discovery resource publication
+- ssdp discovery
+- upnp device host
+4  setting shares  
+4 1  check your current shares  
+open file explorer and type  localhost to address bar to see what shares are made in this computer  
+4 2  create new share ( here i use folder " test " )  
+( setting " turn on sharing so anyone … " in step 2 2  make share for folders in c  users automatic   )
+folder is now shared and network share path is     pcnametest
+4 3  safe way to share folders  
+create user account to all users on your network to whom you want to give access to shared resources  
+use same user id and password which they have on their own computers  
+right click " test " and open properties and select security tab to see current settings  
+default security settings are shown in next picture  
+those settings allow access to shared folders only for those users who have user id on that computer  
+image
+4 4  sharing folder " test " to everyone " ( very unsafe setting ! think carefully do you need to select this ! )
+if you want that everyone have access to that share then go to security tab and  
+- click edit
+- on permission dialog click add  
+- new dialog open and you can add " everyone " to that list
+- when back to permissions dialog select which rights you want to give to " everyone "  
+now anyone on your home network should have access to shared folders without credentials or having user account on your computer  
+5  now when click network on file explorer all your pc's should be visible in computer and network sections  
+this should be cover the essentials to sharing your data over local network   this share is not limited to c  users folder   every folder can be handled like shown in steps 4  
+now your pc's should visible   but if not then try to reset all network settings  
+go to settings / network & internet / status   scroll down to find " network reset   on next window click " reset now " button  
+it will takes about 5 min to perform this reset and then pc reboot automatic  
+when you sign in first time you get notification something like " do you want your pc to be access by other computers "   click yes for that  
