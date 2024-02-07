@@ -1,0 +1,256 @@
+( Block 0 ) : SerialBT-Master ;                                
+( VARIABLES )                                                  
+0 Value Btime 10 Value Etime 0 Value duration 0 Value bcounter 
+0 Value inbyte 0 Value outbyte 0 Value exit-flag               
+0 Value Mac-addr 0 Value deadspace 0 Value FTime               
+0 Value instream 0 Value outstream 0 Value BTO 0 Value XTS     
+0 Value BTO-Flag 0 Value intr-flag 0 Value userstream          
+0 Value Connected 0 Value Cycle-timer 0 Value tempstring       
+0 Value SlaveSBTName 0 Value MasterSBTName                     
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 1 )                                                    
+Create msg1 z" ESP32-BT-Slave" drop                            
+Create msg2 z" Acknowledged  " drop                            
+Create msg3 z" ESP32-BT-Master" drop                           
+Create msg4 z" Completed" drop                                 
+Create msg5 z" Waiting for Connection -- " drop                
+Create msg6 z" SensorX READ" drop                              
+Create msg7 z" SensorX STATUS" drop                            
+Create msg8 z" Error during setup - Aborted" drop              
+Create msg9 z" ESP32-BT-Master Running" drop                   
+128 allocate drop to tempstring                                
+1024 allocate drop to deadspace                                
+msg2 z>s + 2 - dup 13 swap  c! 1+ 10 swap c!                   
+msg1 to SlaveSBTName                                           
+msg3 to MasterSBTName                                          
+                                                               
+( Block 2 )                                                    
+\                                                              
+Include /spiffs/SBT-Master-inc.fb                              
+Pause                                                          
+." Include File loaded" cr                                     
+\                                                              
+: Prep-Data ( A N --  )                                        
+tempstring 128 erase                                           
+1+ 48 + over 6 + c!                                            
+z>s tempstring swap cmove                                      
+tempstring z>s + dup 13 swap c! 1+ 10 swap c!                  
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 3 ) also bluetooth                                     
+: BT-Init                                                      
+80 allocate Drop to instream 80 allocate Drop to outstream     
+tempstring 128 erase instream 80 erase outstream 80 erase      
+80 allocate Drop to userstream userstream 80 erase             
+esp_bt_dev_get_address to Mac-addr  ;                          
+                                                               
+: UPPER ( addr -- )  \ convert to upper case                   
+z>s 0 DO dup c@ dup 64 > IF 95 and over c! Else Drop Then      
+1+ Loop Drop ;                                                 
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 4 )                                                    
+: Sensor1 ;                                                    
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 5 )                                                    
+: Sensor2 ;                                                    
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 6 )                                                    
+: Sensor3 ;                                                    
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 7 )                                                    
+: Sensor4 ;                                                    
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 8 )                                                    
+: Sensor5 ;                                                    
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 9 )                                                    
+: Sensor6 ;                                                    
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 10 )                                                   
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 11 )                                                   
+: _RCD                                                         
+instream 80 erase                                              
+Begin 50 ms instream 80 SBT-Receive                            
+Until ;                                                        
+\                                                              
+ : _disp                                                       
+." Incoming Data -- " instream z>s type                        
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 12 )                                                   
+: GSD ." Gather Sensor Data" cr                                
+6 0 Do Msg7 I prep-data ms-ticks to XTS ." Sensor " I 1+ .     
+."  Status "  cr tempstring dup upper SBT-Send 50 ms           
+_RCD 100 ms _RCD Instream z" ON" strstr                        
+IF Msg6 I prep-data ms-ticks to XTS                            
+tempstring dup upper SBT-Send 50 ms _Rcd 50 ms _Rcd            
+Then ." Elapsed Time = " ms-ticks XTS - . cr cr Loop .. ;      
+\                                                              
+: user-proc ( Process user input )                             
+userstream z" EXIT" strstr userstream z>s                      
+." User Input - " type cr IF 1 to exit-flag                    
+Else 0 to exit-flag userstream z>s + dup 32 swap c! dup        
+1+ 13 swap c! 2 + 10 swap c!                                   
+userstream SBT-Send 50 ms _Rcd 50 ms _Rcd Then                 
+Begin key? IF key drop 0 Else 1 Then Until ;                   
+( Block 13 )                                                   
+: Shutdown ..                                                  
+instream dup IF free to instream Else Drop Then                
+outstream dup IF free to outstream Else Drop Then              
+userstream dup IF free to userstream Else Drop Then            
+SBT-Exit msg4 z>s type cr ;                                    
+                                                               
+: T-Elapsed { Intime }                                         
+ms-ticks Intime 60 * 1000 * + to FTime ;                       
+: Cyc-T                                                        
+ms-ticks 60000 + to cycle-timer ;                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 14 )                                                   
+: Main                                                         
+SBT-Master-Init BT-init                                        
+( Main Processing Routine )                                    
+msg9 z>s type cr 1 T-Elapsed                                   
+etime T-Elapsed 10000 ms-ticks + to cycle-timer                
+Begin key? IF key drop 0 Else 1 Then Until                     
+Begin .. ms-ticks cycle-timer >= IF GSD cyc-t Then             
+Key? IF userstream 80 accept drop userstream Upper user-proc   
+userstream 80 erase exit-flag Else 0 Then                      
+ms-ticks FTime > or Until                                      
+msg4 z>s type cr                                               
+Shutdown ;                                                     
+                                                               
+                                                               
+                                                               
+( Block 15 )                                                   
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               

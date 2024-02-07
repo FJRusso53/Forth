@@ -1,0 +1,32 @@
+( Block 0 )                                                    
+: BT-Trial ;                                                   
+0 value bufferin 0 value bufferout 0 value etime               
+create MasterSBTName z" ESP32-BT-Master" drop                  
+create SlaveSBTName z" ESP32-BT-Slave" drop                    
+include /spiffs/SBT-Master-inc.fb                              
+                                                               
+: Init 80 allocate drop to bufferin                            
+80 allocate drop to bufferout                                  
+bufferin 80 erase bufferout 80 erase ;                         
+                                                               
+: main ." Let's Begin" cr ms-ticks 15000 + to etime            
+init SBT-Master-init 1000 ms                                   
+Begin 25 ms bufferin 80 SBT-Receive                            
+ms-ticks etime > IF ms-ticks 30000 + to etime                  
+z" Master Calling Slave   " SBT-Send drop Then                 
+( Block 1 )                                                    
+key? IF Key 13 = IF 1 Else 0 Then Else 0 Then                  
+Until SBT-Exit  cr ." Task Completed" cr bufferin free drop    
+0 to bufferin bufferout free drop 0 to bufferout ;             
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               

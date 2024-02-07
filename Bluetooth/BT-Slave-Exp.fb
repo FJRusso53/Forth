@@ -1,0 +1,16 @@
+( Block 0 )
+: BT-Trial ;
+0 value inbuffer 0 value outbuffer
+create MasterSBTName z" ESP32-BT-Master" drop
+create SlaveSBTName z" ESP32-BT-Slave" drop
+include /spiffs/SBT-Slave-inc.fb
+: Init
+80 allocate drop to inbuffer 80 allocate drop to outbuffer
+inbuffer 80 erase outbuffer 80 erase ;
+
+: main ." Let's Begin" cr
+init SBT-Slave-init 1000 ms
+Begin 25 ms inbuffer 80 SBT-Receive
+key? IF Key 13 = IF 1 Else 0 Then Else 0 Then
+Until SBT-Exit  cr ." Task Completed" cr inbuffer free drop
+0 to inbuffer outbuffer free drop 0 to outbuffer ;

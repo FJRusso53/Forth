@@ -1,0 +1,48 @@
+\ ESP32Forth                                                   
+\ Bluetooth Communications code vs 1.1.0                       
+\ Dev FJRusso June 2023                                        
+\                                                              
+: SBT-Master_inc ;                                             
+\ Requires MasterSBTName & SlaveSBTName be predefined          
+\ In main coding area                                          
+\                                                              
+0 Value BTO 0 Value Mac-Addr                                   
+Also Bluetooth                                                 
+: SBT-Master-init   ( -- )                                     
+SerialBT.new to BTO ." BTO = " BTO . cr                        
+BTO SerialBT.enableSSP ." SSP Enabled" cr                      
+MasterSBTName 1 BTO SerialBT.begin drop 250 ms                 
+." ESP32-BT-Master is Visible" cr ." Connecting - "            
+esp_bt_dev_get_address to Mac-addr                             
+SlaveSBTName BTO SerialBT.connect 500 ms                       
+IF ." Successful" cr Else ." Unsuccessful" cr Then             
+250 ms 3000 BTO SerialBT.connected 250 ms drop                 
+;                                                              
+: SBT-Receive ( addr n -- n )                                  
+{ inbuffer bcounter }                                          
+BTO SerialBT.available IF                                      
+InBuffer bcounter BTO SerialBT.readBytes to bcounter           
+." Incoming Data - " Inbuffer bcounter Type bcounter           
+100 ms BTO SerialBT.flush Else 0 Then                          
+;                                                              
+: SBT-Send ( addr -- n )                                       
+{ outbuffer }                                                  
+outbuffer z>s 2dup + 2 - 13 swap c!                            
+2dup + 1 - 10 swap c!                                          
+                                                               
+BTO serialbt.write ( bto -- n ) \ Bytes written returned       
+100 ms BTO SerialBT.flush                                      
+;                                                              
+: SBT-Exit                                                     
+BTO SerialBT.end 0 to BTO                                      
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               

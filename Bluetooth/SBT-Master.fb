@@ -1,0 +1,32 @@
+: SBT-Master ;                                                 
+0 Value BTO 0 Value bcounter 0 Value ETime 0 Value cycleT      
+0 Value inbuffer 0 Value outbuffer                             
+80 allocate drop to inbuffer inbuffer 80 erase                 
+Also Bluetooth                                                 
+: Main                                                         
+SerialBT.new to BTO ." BTO = " BTO . cr                        
+BTO SerialBT.enableSSP ." SSP Enabled" cr                      
+z" ESP32-BT-Master" 1 BTO SerialBT.begin drop 250 ms           
+." ESP32-BT-Master is Visible" cr ." Connecting" cr            
+z" ESP32-BT-Slave" BTO SerialBT.connect 500 ms                 
+IF ." Successful" cr Else ." Unsuccessful" cr Then             
+50 ms 3000 BTO SerialBT.connected drop                         
+ms-ticks 10000 + to ETime  ms-ticks to cycleT                  
+Begin 25 ms BTO SerialBT.available                             
+                                                               
+IF InBuffer 80 BTO SerialBT.readBytes to bcounter              
+." Incoming Data - " inbuffer bcounter type                    
+ms-ticks cycleT - ." Elapsed Time = " . cr                     
+inbuffer 80 erase 0 to bcounter Then                           
+ms-ticks etime > IF s" Master Calling Slave UnitXX"            
+2dup + 2 - 13 swap c!                                          
+2dup + 1 - 10 swap c!                                          
+ms-ticks to cycleT                                             
+BTO serialbt.write drop                                        
+20 ms BTO SerialBT.flush                                       
+ms-ticks 10000 + to etime Then                                 
+Key? IF Key 13 = IF 1 Else 0 Then Else 0 Then                  
+Until BTO SerialBT.end ;                                       
+                                                               
+                                                               
+\                                                              

@@ -1,0 +1,48 @@
+\                                                              
+\ ESP32Forth                                                   
+\ Bluetooth Communications code vs 1.1.0                       
+\ Dev FJRusso June 2023                                        
+\                                                              
+: SBT-Slave_Inc ;                                              
+\ Requires MasterSBTName & SlaveSBTName be predefined          
+\ In main coding area                                          
+\                                                              
+ 0 Value BTO 0 Value Mac-Addr                                  
+Also Bluetooth                                                 
+: SBT-Slave-init                                               
+SerialBT.new to BTO ." BTO = " BTO . cr                        
+BTO SerialBT.enableSSP ." SSP Enabled" cr                      
+SlaveSBTName 0 BTO SerialBT.begin drop 250 ms                  
+esp_bt_dev_get_address to Mac-addr                             
+\                                                              
+." ESP32-BT-Slave is Visible" cr ." Awaiting Connection" cr ;  
+\                                                              
+: SBT-Receive ( addr n -- n )                                  
+{ Inbuffer bcounter }                                          
+BTO SerialBT.available                                         
+IF Inbuffer bcounter erase 0 to bcounter                       
+InBuffer 80 BTO SerialBT.readBytes to bcounter                 
+." Incoming Data - " Inbuffer bcounter type                    
+50 ms s" AcknowledgedXX" 2dup + 2 - 13 swap c!                 
+2dup + 1 - 10 swap c! BTO SerialBT.write drop                  
+." Acknowledgement Sent" cr 100 ms BTO SerialBT.Flush          
+bcounter Else 0 Then ;                                         
+                                                               
+                                                               
+                                                               
+\                                                              
+: SBT-Send ( addr -- n )                                       
+{ outbuffer }                                                  
+outbuffer z>s 2dup + 2 - 13 swap c!                            
+2dup + 1 - 10 swap c!                                          
+BTO serialbt.write ( bto -- n ) \ Bytes written returned       
+100 ms BTO SerialBT.flush                                      
+;                                                              
+\                                                              
+: SBT-Exit                                                     
+BTO SerialBT.end 0 to BTO                                      
+;                                                              
+                                                               
+                                                               
+                                                               
+\                                                              

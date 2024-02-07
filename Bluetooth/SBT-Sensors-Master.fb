@@ -1,0 +1,256 @@
+( Block 0 ) : SerialBT-Master ;
+( VARIABLES )
+0 Value Btime 10 Value Etime 0 Value duration 0 Value bcounter
+0 Value inbyte 0 Value outbyte 0 Value error-flag
+0 Value Mac-addr 0 Value deadspace 0 Value FTime
+0 Value instream 0 Value outstream 0 Value BTO 0 Value XTS
+0 Value BTO-Flag 0 Value intr-flag
+0 Value Connected 0 Value Cycle-timer 0 Value tempstring
+35 Constant _hash 126 Constant _tilda
+
+
+
+
+
+
+
+( Block 1 )
+Create msg1 z" ESP32-BT-Slave" drop
+Create msg2 z" Acknowledged  " drop
+Create msg3 z" ESP32-BT-Master" drop
+Create msg4 z" Completed" drop
+Create msg5 z" Waiting for Connection -- " drop
+Create msg6 z" SensorX Read" drop
+Create msg7 z" SensorX Status" drop
+Create msg8 z" Error during setup - Aborted" drop
+Create msg9 z" ESP32-BT-Master Running" drop
+128 allocate drop to tempstring
+1024 allocate drop to deadspace
+msg2 z>s + 2 - dup 13 swap  c! 1+ 10 swap c!
+
+
+
+( Block 2 )
+: Prep-Data ( A N --  )
+tempstring 128 erase
+1+ 48 + over 6 + c!
+z>s tempstring swap cmove
+tempstring z>s + dup 13 swap c! 1+ 10 swap c!
+;
+
+
+
+
+
+
+
+
+
+( Block 3 ) also bluetooth
+: BT-Init
+80 allocate 0= IF to instream 80 allocate 0= IF to outstream
+else 1 to error-flag Then else 1 to error-flag Then
+tempstring 128 erase instream 80 erase outstream 80 erase
+error-flag 0= If Begin SerialBT.new depth 0=
+If 1000 ms 0 Else Dup Then Until to BTO ." BTO = " bto . cr
+BTO 0 > If msg3 BTO SerialBT.master to BTO-Flag
+esp_bt_dev_get_address to Mac-addr
+BTO SerialBT.enableSSP ." SSP Enabled" cr 100 ms
+key? IF key drop Then Then
+msg1 BTO SerialBT.connect  ( remotename bt -- f )
+dup to connected IF ." Successful!" cr
+Else ." Failed to connect" cr Then
+Else ." *Error* allocating Memory" cr Then  ;
+
+( Block 4 )
+: Sensor1 ;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+( Block 5 )
+: Sensor2 ;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+( Block 6 )
+: Sensor3 ;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+( Block 7 )
+: Sensor4 ;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+( Block 8 )
+: Sensor5 ;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+( Block 9 )
+: Sensor6 ;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+( Block 10 )
+: IND  ( --- )
+instream 80 erase 0 to bcounter
+Begin BTO SerialBT.available
+IF instream 80 BTO SerialBT.readBytes to bcounter
+."  - "  instream bcounter type 1
+Else 0 Then 20 ms
+Until
+;
+
+
+
+
+
+
+
+( Block 11 )
+: Indata
+BTO SerialBT.available
+IF cr ." BT Incoming Data Available" cr
+instream 80 erase 0 to inbyte 0 to bcounter
+BTO SerialBT.available IF
+instream 80 BTO SerialBT.readBytes to bcounter
+."  - "  instream bcounter type
+Then Then ;
+
+
+
+
+
+
+
+( Block 12 )
+: Outdata ( addr -- ) outstream 80 erase
+dup z>s ." Outgoing data - " type
+z>s outstream swap cmove outstream z>s +
+dup 13 swap c! 1+ 10 swap c! outstream z>s
+bto serialbt.write drop 20 ms BTO SerialBT.flush
+0 to bcounter ;
+
+: GSD ." Gather Sensor Data" cr
+6 0 Do Msg7 I prep-data ms-ticks to XTS
+tempstring outdata 20 ms bto SerialBT.flush
+IND IND Instream z" ON" strstr IF
+Msg6 I prep-data ms-ticks to XTS tempstring outdata
+20 ms bto SerialBT.flush IND 50 ms IND
+Then ." Elapsed Time = " ms-ticks XTS - . cr  cr Loop ;
+
+( Block 13 )
+: Shutdown ..
+instream dup IF free to instream Else Drop Then
+outstream dup IF free to outstream Else Drop Then
+BTO serialbt.end 0 to BTO msg4 z>s type cr ;
+
+: T-Elapsed { Intime }
+ms-ticks Intime 60 * 1000 * + to FTime ;
+: Cyc-T
+ms-ticks 60000 + to cycle-timer ;
+
+
+
+
+
+
+( Block 14 )
+: Main
+BT-init error-flag 0= bto-flag 0 > AND connected AND IF
+( Main Processing Routine )
+msg9 z>s type 9 emit msg5 z>s type 1 T-Elapsed
+Begin 50 ms 3000 BTO SerialBT.connected ( timeout bt -- f )
+key? ms-ticks FTime > or or Until
+key? If key drop ." Keyboard interrupt!" cr
+Else cr ." Connected to " msg1 dup z>s type cr outdata
+etime T-Elapsed 10000 ms-ticks + to cycle-timer
+Begin 25 ms indata
+ms-ticks cycle-timer >= IF GSD cyc-t Then
+key? IF Key 13 = IF 1 Else 0 Then Else 0 Then
+ms-ticks FTime > or Until
+msg4 z>s type cr Then
+Shutdown
+( Block 15 )
+Else msg8 z>s type cr
+( Error Trapping )
+." BTO-Flag = " BTO-flag . 9 emit ." Error-Flag = "
+error-flag . 9 emit ." Connection = " connected . cr
+Then
+;
+
+
+
+
+
+
+
+
+\

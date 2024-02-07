@@ -1,0 +1,176 @@
+( Block 0 ) : SerialBT-Slave ;                                 
+( VARIABLES )                                                  
+0 Value Btime 0 Value Etime 0 Value duration 0 Value bcounter  
+0 Value inbyte 0 Value outbyte 0 Value error-flag              
+0 Value FTime 10 Value ETime 0 Value SlaveSBTName              
+0 Value instream 0 Value outstream 0 Value datastream          
+0 Value sensum                                                 
+3141592 Value seed1 6535897 Value seed2 9323846 Value seed3    
+\                                                              
+\                                                              
+\                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 1 )                                                    
+Create msg1 z" ESP32-BT-Slave" drop                            
+Create msg2 z" Acknowledged  " drop                            
+Create msg3 z" RTS " drop                                      
+Create msg4 z" Completed" drop                                 
+Create msg5 z" Ready" drop                                     
+Create msg6 z" Sensor Status ON" drop                          
+Create msg7 z" Sensor Status OFF" drop                         
+Create msg8 z" Error during setup - Aborted" drop              
+Create msg9 z" ESP32-BT-Slave Sensor Data Acq " drop           
+Create msg10 z" Sensor Data xxxx" drop                         
+Create msg11 z" Unrecognized Command" drop                     
+Create msg12 z" Sensor Data Bundle" drop                       
+Create msg13 z" Bad Request" drop                              
+msg2 z>s + 2 - dup 13 swap  c! 1+ 10 swap c!                   
+msg1 to SlaveSBTName                                           
+( Block 2 )                                                    
+Include /spiffs/SBT-Slave-inc.fb                               
+: Init                                                         
+80 allocate Drop to instream 80 allocate Drop to outstream     
+80 allocate Drop to datastream datastream 80 erase             
+instream 80 erase outstream 80 erase                           
+80 allocate Drop to sensum sensum 80 erase                     
+ms-ticks ETime 60 * 1000 * + to FTime                          
+key? IF key drop Then ;                                        
+                                                               
+: SEV ( addr -- n )                                            
+dup z" READ" strstr                                            
+IF drop 1                                                      
+Else z" STATUS" strstr                                         
+IF drop 2 Else 0 Then Then ;                                   
+                                                               
+( Block 3 )                                                    
+: Shutdown .. SBT-Exit                                         
+instream dup IF free to instream Else Drop Then                
+outstream dup IF free to outstream Else Drop Then              
+sensum dup IF free to sensum Else Drop Then                    
+datastream dup IF free to datastream Else Drop Then ;          
+: data-prep ( addr --- addr )                                  
+outstream 80 erase z>s outstream swap cmove                    
+outstream z>s + dup 13 swap c!                                 
+1+ 10 swap c! outstream ;                                      
+\                                                              
+: Random ( n1 -- n2 ) dup 0= IF 1+ Then                        
+SEED1 177 /MOD    2 *  SWAP  171 *  SWAP  - DUP  to SEED1      
+SEED2 176 /MOD  35 *  SWAP  172 *  SWAP  - DUP  to SEED2       
+SEED3 178 /MOD  63 *  SWAP  170 *  SWAP  - DUP  to SEED3       
++  + SWAP  MOD  ;                                              
+( Block 4 )                                                    
+: Rnd-Data ( n -- addr )                                       
+{ rndpt }                                                      
+datastream 80 erase  msg3 z>s datastream swap cmove            
+rndpt random <# # # # #> datastream z>s + swap cmove           
+datastream ;                                                   
+\                                                              
+: sensor-send ( addr -- n )                                    
+data-prep dup z>s type                                         
+50 ms SBT-Send 50 ms ;                                         
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 5 )                                                    
+: Sensor1 ( addr -- )                                          
+SEV Case                                                       
+0 of msg13 sensor-send not endof                               
+1 of 10 Rnd-Data sensor-send not endof                         
+2 of 2 Random 0= IF msg6 Else msg7 Then sensor-send not endof  
+EndCase ;                                                      
+\                                                              
+: Sensor2                                                      
+SEV  Case                                                      
+0 of msg13 sensor-send not endof                               
+1 of 128 Rnd-Data sensor-send not endof                        
+2 of 2 Random 0= IF msg6 Else msg7 Then sensor-send not endof  
+Endcase ;                                                      
+                                                               
+                                                               
+( Block 6 )                                                    
+: Sensor3                                                      
+SEV  Case                                                      
+0 of msg13 sensor-send 1 endof                                 
+1 of 256 Rnd-Data sensor-send not endof                        
+2 of 2 Random 0= IF msg6 Else msg7 Then sensor-send not endof  
+Endcase ;                                                      
+\                                                              
+: Sensor4                                                      
+SEV  Case                                                      
+0 of msg13 sensor-send 1 endof                                 
+1 of 32 Rnd-Data sensor-send not endof                         
+2 of 2 Random 0= IF msg6 Else msg7 Then sensor-send not endof  
+Endcase ;                                                      
+                                                               
+                                                               
+( Block 7 )                                                    
+: Sensor5                                                      
+SEV  Case                                                      
+0 of msg13 sensor-send 1 endof                                 
+1 of 16 Rnd-Data sensor-send not endof                         
+2 of 2 Random 0= IF msg6 Else msg7 Then sensor-send not endof  
+Endcase ;                                                      
+\                                                              
+: Sensor6                                                      
+SEV  Case                                                      
+0 of msg13 sensor-send 1 endof                                 
+1 of 10 Rnd-Data sensor-send not endof                         
+2 of 2 Random 0= IF msg6 Else msg7 Then sensor-send not endof  
+Endcase ;                                                      
+                                                               
+                                                               
+( Block 8 )                                                    
+: sensor-sum                                                   
+." Bundle sensor summary " cr                                  
+sensum 80 erase sensum 60 32 fill 42 sensum c!                 
+6 0 Do sensum I 9 * + 83 over 2 + c! \                         
+I 1+ 48 + over 3 + c!                                          
+2 random Dup >r 1 = IF 1 Else 0 Then Over 5 + c!               
+r> 1 = IF 64 random <# # # # #> rot 7 + swap cmove             
+Else drop Then Loop                                            
+42 sensum 57 + c!                                              
+sensum 59 + dup 13 swap c! 1+ 10 swap c!                       
+sensum 61 250 ms BTO Serialbt.Write                            
+25 ms BTO SerialBT.Flush ;                                     
+                                                                                                                                                                                                ( Block 9 )                                                    
+\ Process Incomming Data for Request                           
+: PIDR ( addr -- )                                             
+." Process Incoming Data for a Request "  cr                   
+dup bl strchr dup 0 >                                          
+IF over - over swap                                            
+1000 ms ['] evaluate catch                                     
+0= IF ." Success" cr Else ." Failed Call" cr ..                
+500 ms msg11 sensor-send Then                                  
+500 ms Else msg11 sensor-send Then ;                           
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 10 )                                                   
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+( Block 11 )                                                   
+: Main                                                         
+Init SBT-Slave-Init                                            
+( Main Processing Routine )                                    
+msg9 z>s type cr                                               
+Begin 25 ms .. instream 80 SBT-Receive                         
+  IF instream PIDR Then                                        
+   key? IF Key 13 = IF 1 Else 0 Then Else 0 Then               
+   ms-ticks FTime > or                                         
+Until msg4 z>s type cr                                         
+Shutdown ;                                                     
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                

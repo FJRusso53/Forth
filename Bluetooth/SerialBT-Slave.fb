@@ -1,0 +1,256 @@
+( Block 0 ) : SerialBT-Slave ;                                 
+( VARIABLES )                                                  
+0 Value Btime 0 Value Etime 0 Value duration 0 Value bcounter  
+0 Value inbyte 0 Value outbyte 0 Value error-flag              
+0 Value Mac-addr 0 Value deadspace 0 Value FTime               
+0 Value instream 0 Value outstream 0 Value BTO                 
+10 Value ETime 0 Value BTO-Flag                                
+35 Constant _hash 126 Constant _tilda                          
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 1 )                                                    
+Create msg1 z" ESP32-BT-Slave" drop                            
+Create msg2 z" Acknowledged  " drop                            
+Create msg3 z" RTS" drop                                       
+Create msg4 z" Completed" drop                                 
+Create msg5 z" Ready" drop                                     
+Create msg6 z" Sensor Status ON" drop                          
+Create msg7 z" Sensor Status OFF" drop                         
+Create msg8 z" Error during setup - Aborted" drop              
+Create msg9 z" ESP32-BT-Slave Running " drop                   
+Create msg10 z" Sensor Data xxxx" drop                         
+1024 allocate drop to deadspace                                
+msg2 z>s + 2 - dup 13 swap  c! 1+ 10 swap c!                   
+                                                               
+                                                               
+                                                               
+( Block 2 )                                                    
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 3 ) also bluetooth                                     
+: BT-Init                                                      
+80 allocate 0= IF to instream 80 allocate 0= IF to outstream   
+else 1 to error-flag Then else 1 to error-flag Then            
+error-flag 0= If Begin SerialBT.new depth 0=                   
+If 1000 ms 0 Else Dup Then Until to BTO ." BTO = " bto . cr    
+BTO 0 > If msg1 BTO SerialBT.slave to BTO-Flag                 
+esp_bt_dev_get_address to Mac-addr                             
+BTO SerialBT.enableSSP ." SSP Enabled" cr 100 ms               
+ms-ticks ETime 60 * 1000 * + to FTime                          
+key? IF key drop Then Then                                     
+Else ." *Error* allocating Memory" cr Then  ;                  
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 4 )                                                    
+: Outdata ( addr -- )                                          
+ z>s 2dup ." Outgoing data - " type                            
+bto serialbt.write drop 20 ms BTO SerialBT.flush               
+0 to bcounter                                                  
+;                                                              
+: SEV ( addr -- n )                                            
+dup z" Read" strstr                                            
+IF Drop ." Sensor Read" cr 1                                   
+Else z" Status" strstr                                         
+IF ." Sensor Status" cr 2                                      
+Else 0                                                         
+Then Then ;                                                    
+                                                               
+                                                               
+                                                               
+( Block 5 )                                                    
+: Shutdown ..                                                  
+instream dup IF free to instream Else Drop Then                
+outstream dup IF free to outstream Else Drop Then              
+BTO serialbt.end 0 to BTO msg4 z>s type cr ;                   
+                                                               
+: data-prep ( addr --- addr )                                  
+outstream 80 erase z>s outstream swap cmove                    
+outstream z>s + dup 13 swap c!                                 
+1+ 10 swap c! outstream ;                                      
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 6 )                                                    
+: Sensor1 ( addr -- )                                          
+SEV Case                                                       
+0 of ." Bad Request" cr 1 endof                                
+1 of msg3 data-prep outdata 0 endof                            
+2 of msg6 data-prep outdata 0 endof                            
+EndCase                                                        
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 7 )                                                    
+: Sensor2                                                      
+SEV  ( ." SEV Return Value = " dup . cr )  Case                
+0 of ." Bad Request" cr 1 endof                                
+1 of msg3 data-prep outdata 0 endof                            
+2 of msg6 data-prep outdata 0 endof                            
+Endcase                                                        
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 8 )                                                    
+: Sensor3                                                      
+." Sensor3 Process" cr                                         
+1+ dup z" Read" strstr                                         
+IF Drop ." Sensor Read" cr                                     
+Else z" Status" strstr                                         
+IF ." Sensor Status" cr Then                                   
+Then                                                           
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 9 )                                                    
+: Sensor4                                                      
+." Sensor4 Process" cr                                         
+1+ dup z" Read" strstr                                         
+IF Drop ." Sensor Read" cr                                     
+Else z" Status" strstr                                         
+IF ." Sensor Status" cr Then                                   
+Then                                                           
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 10 )                                                   
+: Sensor5                                                      
+." Sensor5 Process" cr                                         
+1+ dup z" Read" strstr                                         
+IF Drop ." Sensor Read" cr                                     
+Else z" Status" strstr                                         
+IF ." Sensor Status" cr Then                                   
+Then                                                           
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 11 )                                                   
+: Sensor6                                                      
+." Sensor6 Process" cr                                         
+1+ dup z" Read" strstr                                         
+IF Drop ." Sensor Read" cr                                     
+Else z" Status" strstr                                         
+IF ." Sensor Status" cr Then                                   
+Then                                                           
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 12 )                                                   
+\ Process Incomming Data for Request                           
+: PIDR ( addr -- )                                             
+." Process Incoming Data for a Request - " .s cr               
+dup bl strchr dup 0 >                                          
+IF over - over swap ." PDIR Stack - " .s cr                    
+['] evaluate catch                                             
+0= IF ." Success" cr Else ." Failed Call" cr .. Then           
+Then                                                           
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 13 )                                                   
+: Indata                                                       
+BTO SerialBT.available                                         
+IF cr  ." BT Incoming Data Available" cr                       
+instream 80 erase 0 to bcounter                                
+instream 80 BTO SerialBT.readBytes to bcounter                 
+z"  - " 3 type instream bcounter type                          
+msg2 outdata 2000 ms instream PIDR                             
+Then  ;                                                        
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 14 )                                                   
+: Main                                                         
+BT-init error-flag 0= bto-flag 0 > AND IF                      
+( Main Processing Routine )                                    
+msg9 z>s type cr                                               
+Begin 25 ms .. indata                                          
+key? IF Key 13 = IF 1 Else 0 Then Else 0 Then                  
+ms-ticks FTime > or Until msg4 z>s type cr                     
+Shutdown                                                       
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 15 )                                                   
+Else msg8 z>s type cr                                          
+( Error Trapping )                                             
+." BTO-Flag = " BTO-flag . 9 emit ." Error-Flag = "            
+error-flag . cr                                                
+Then                                                           
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
