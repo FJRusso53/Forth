@@ -1,0 +1,15 @@
+ProjectName= AI-Mind
+BuildFile= 
+SearchPath= c:\programming\win32forth\proj\aimind-i\2021
+AI-Mind,0
+Modules,1
+
+DLLs,0
+Forms,0
+Auxiliary Files,0
+Resources,0
+Docs,4
+proj\AIMind-I\2021\AI-Func-Calls.f
+proj\AIMind-I\2021\Win-AIMind-20.h
+proj\AIMind-I\2021\Win-AIMind-21.f
+proj\AIMind-I\2021\AI-dot-calls-20.f
