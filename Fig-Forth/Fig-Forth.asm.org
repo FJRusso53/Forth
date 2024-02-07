@@ -1,0 +1,4578 @@
+Comment ~ 
+Fig-Forth.asm
+ FJRusso Vs 2.3  
+ Sunday, December 17, 2023 12:29:06 PM
+ Frank's attempt at a Fig-FORTH Core in 32 bit Assmembler
+ 
+ ACCOMPLISHMENTS:
+ I/O Built
+ ." , s" , . , ' , .S,
+ emit, ms@, pause, wcount, words, ALLOT, ALLOCATE, FREE, TYPE,
+ Constant, Variable, Value, TO, +TO, PARSE-STR, ANEW, FORGET, I2HEX, DUMP,
+ [If], [Else], [Then], [BEGIN], [UNTIL], 
+ OPEN-FILE, CREATE-FILE, CLOSE-FILE, FILE-EXIST, FILE-SIZE, READ-FILE,
+ *****************************************************************************
+ Above words are all working
+ 
+ Notes to Self:
+7 PROC CreateFile           : DONE
+1 PROC CloseHandle          : DONE
+4 PROC ReadFile
+4 PROC WriteFile
+1 PROC DeleteFile
+2 PROC MoveFile
+4 PROC SetFilePointer
+1 PROC FlushFileBuffers
+2 PROC SetEndOfFile
+ invoke atodw, ADDR MyDecimalString                ; CONVERT ASCII STRING TO NUMBER (EAX)
+ invoke dwtoa, dwValue:DWORD, lpBuffer:DWORD       ; CONVERT DWORD NUMBER TO ASCII STRING
+ invoke udw2str, dwNumber:DWORD, pszString:DWORD   ; Convert unsigned DWORD to string
+ invoke ustr2dw, ustr2dw proc pszString:DWORD      ; Convert string to unsigned DWORD (EAX)
+ invoke Free, proc public pv:DWORD
+ invoke GlobalUnlock, pMem
+ invoke GlobalFree, hMemory
+ invoke GlobalAlloc,0,TV1            ; GMEM_MOVEABLE=0 or GMEM_ZEROINIT=2
+ invoke GlobalLock, hMemory
+ hex2bin proc src:DWORD,dst:DWORD
+ bin2hex proc lpString:DWORD,lnString:DWORD,lpbuffer:DWORD
+ GetNumberOfConsoleInputEvents 
+ GetSystemTime
+ GetLocalTime
+ typedef struct _SYSTEMTIME {
+  WORD wYear;
+  WORD wMonth;
+  WORD wDayOfWeek;
+  WORD wDay;
+  WORD wHour;
+  WORD wMinute;
+  WORD wSecond;
+  WORD wMilliseconds;
+ } SYSTEMTIME, 
+ ;
+ Using MASM32 in VS 2022
+ end of Comments ~
+;
+.486
+.MODEL flat,stdcall
+option casemap :none   ; case sensitive
+.LIST
+;
+.stack 4096 
+;
+; #########################################################################
+;
+      ;include \masm32\include\windows.inc
+      ;include \masm32\macros\macros.asm
+      ;
+      include \masm32\include\masm32.inc
+      ;include \masm32\include\user32.inc
+      include \masm32\include\kernel32.inc
+      ;include \masm32\include\masm32rt.inc
+      ;
+      includelib \masm32\lib\masm32.lib
+      ;includelib \masm32\lib\user32.lib
+      includelib \masm32\lib\kernel32.lib
+;
+NEXTC macro byte
+   MOV EAX, [EDI]
+   ADD EDI, 4
+   JMP EAX 
+endm
+;
+BRNEXT macro byte
+   mov edi, [edi]
+   mov eax, -4 [edi]
+   jmp [eax]
+endm
+;
+Main   PROTO
+;      
+; #########################################################################
+;
+.data ; Data Section
+;
+DSB DB 'DSBUFFER', 32 dup (0H) ; A buffer between the data stack and return stack
+R0 DB 1024 dup (0H) ; Return Stack Base of size 1024 
+RSB DB 'RSBUFFER', 32 dup (0H) ; Buffer between return stack and CONTROL STACK
+C0 DB 1024 DUP (0H) ; CONTROL WORDS STACK
+CSB DB 'CSBUFFER', 32 DUP (0H) ; Buffer between CONTROL stack and data area
+PAD DB 160 dup (0H) ; Output buffer
+TIB DB 160 dup (0H) ; Input buffer
+POC DB 160 dup (0H) ; Pocket 
+SCRATCH DB 160 DUP (0H) ; SCRATCH PAD FOR CONVERSIONS
+_SYSTIME DD 4 dup (0H) ; SYSTEM TIME  SEE STRUCTURE IN NOTES ABOVE 
+; -----------------------------
+_EDI DD 0
+_hMemory DD 0
+_IN DD 0
+_SOURCE DD TIB, 0
+ABORTFLAG DD 0
+BASE DD 10      ; NUMERIC BASE IN USE DECIMAL IS DEFAULT
+BYEFLAG DD 1    ; EXIT FLAG
+CFA DD 0        ; CODE FIELD ADDRESS
+CSP DD C0 + 1023    ; CONTROL STACK POINTER
+CURRENT DD 0
+DCW DD 0       ; DICTIONARY WORD COUNT
+DOUBLEQ DD 0   ; double value
+DPLOCATION DD -1  ; decimal point location
+DPR DD 0        ; END OF DICTIONARY POINTER
+FCOUNTER DD 0   ; FIND COUNTER
+FFLAG DD 0      ; FIND FLAG
+gone dd 0
+HLD DD PAD
+KEYIN DD 0
+LATEST DD 0     ; LAST WORD IN DICTIONARY
+LFA DD 0        ; LINK FIELD ADDRESS
+MALLOCHADDR DD 0   ; heap address
+MALLOCLINK  DD 0   ; head of single linked list
+MAXBUFFER DD 260
+MAXCOUNTED DD 255
+MAXSTRING DD 255
+MEMLIMIT DD USER_BASE+(1024*64)
+NFA DD 0        ; NAME FIELD ADDRESS
+PFA DD 0        ; PARAMETER FIELD ADDRESS
+pMem DD 0
+POCKET DD POC
+PREVIOUS DD h_COMPILE
+RO DD -2147483648
+RW DD -1073741824
+WO DD  1073741824
+RSP DD R0 + 1023 ; RETURN STACK POINTER
+S_ADR DD TIB
+SIGNFLAG DD 0
+S_LEN DD 0
+SMAX DD 8
+S0 DD 0         ; Stack base starting point pointer
+STACKERROR DD 0 ; STACK STATUS
+STATE DD 0      ; INTERPRETIVE OR COMPILE  0/1
+TV1 DD 0        ; TEMPORARY VARIABLES
+TV2 DD 0
+TV3 DD 0
+TV$ DD 0
+VENUMQ DD 0
+xpos DD 0       ; SCREEN COORDINATES
+ypos DD 0
+; -----------------------------
+Msg1 DB  '        Fig-Forth vs 2.3', 13, 10, 0h
+Msg1A DB '            FJRusso', 13, 10, 0h
+Msg2 DB  '    Saturday, December 09 2023' , 13, 10, 0h
+Msg3 DB ' sdfj rjsdl; fFDKJ;SDFORSJ 34854356 lksirn 54kvf 35kfg ', 0h ; NOT USED
+Msg4 DB ' AIFVJOI FAOJ AVFAO VOI54 fghgfh6U04R NFRRdfgbbgV NARV ', 0h ; NOT USED
+Msg5 DB ' Text Interpreter entered ', 0h
+Msg6 DB ' ok', 13, 10, 0h
+Msg7 DB ' wait key -- ', 0h
+Msg8 DB ' Exiting FORTH', 13, 10, 0h
+Msg9 DB ' Fig Forth Begining', 0h
+Msg10 DB ' ERROR OCCURED - ', 0h
+Msg11 DB ' NOT FOUND', 13, 10, 0h
+Msg12 DB ' Data Section - ', 0h
+Msg13 DB ' Core Space - ', 0h
+Msg14 DB ' Appl Space - ', 0h
+Msg15 DB ' bytes used', 13, 10, 0h
+Msg16 DB ' bytes free', 13, 10, 0h
+Msg17 DB ' Words in Dictionary - ',0h
+Msg18 DB ' Failure to Allocate memory', 13, 10, 0h
+Msg19 DB ' Process ABORTED ', 13, 10, 0h
+Msg20 DB ' Press ENTER to continue --- ', 0h
+Msg21 DB ' Process Terminated', 0H
+Msg22 DB ' STACK UNDERFLOW ERROR', 0H
+;
+MsgQ DB ' ? ', 0H
+Mempty DB ' empty ', 0h
+crlf$ DB 13, 10, 0h
+SEP1$ DB ' | ', 0h
+SPACE$ DB 20H,0H
+HEX_TABLE DB "0123456789ABCDEF"
+%Date       db  " &@Date ", 0H      ; DATE CompileD
+%time       db  " &@Time", 0H       ; TIME Compiled
+;
+USER_BASE DD 16364 dup (0H); Start of USER Area Dictionary 64k
+;
+.code
+;
+Forth_Thread:
+DD do_COLD      ; BOOT CALL
+DD do_SCRINIT   ; INITIALIZE SCREEN DISPLAY
+DD do_ABORT     ; USED AFTER COMPLETION OF ACTIONS
+DD do_QUIT      ; ISSUES 'OK' PROMPT
+DD TI1          ; THE TEXT INTERPRETER
+;
+; ---------------------------------------------------------------------------
+;
+    Start:
+      	invoke Main
+;
+LEA EDI, Forth_Thread ; Load DI with Forth_Thread
+NEXTC
+;
+TI1: ; Text Interpreter
+;
+PUSH $ + 10
+JMP do_DOCOL
+ @ACCEPT:                                           ; Label
+ DD do_BEGIN@                                       ; CYCLE TILL 'bye' IS RECEIVED
+ DD do_ACCEPT, do_DROP
+ DD do_BEGIN@                                       ; CYCLE TRHOUGH INPUT STRING
+ DD do_POC, do_ZCOUNT, do_PUSH0, do_FILL            ; erase input buffer
+ DD do_TIB, do_BL, do_WORD                          ; INPUT BUFFER, SEARCH DELIMITER, PARSE INPUT STRING
+ DD do_COUNT, do_FIND                               ; GET LENGTH, LOCATE INPUT CHAR STRING IN DICTIONARY
+ DD do_FFLAG, do_FETCH                              ; FLAG = TRUE <>0 THEN EXECUTE
+ DD do_IF@, do_EXECUTE     
+ DD do_ELSE@, do_NUMBER, do_EMSG, do_THEN@          ; ? NUMBER AVAILABLE ON STACK          
+ DD do_IN, do_FETCH, do_S_LEN, do_FETCH, do_NEQ     ; S_LEN _IN <> 
+ DD do_UNTIL@ 
+ DD do_PUSH0, do_IN, do_STORE, do_QUIT             ; 0 _IN !  DISPLAY 'ok'
+ DD do_QBYE
+ DD do_UNTIL@ 
+ DD @@EXIT
+ @@EXIT:
+ invoke StdOut,ADDR crlf$ 
+ invoke StdOut,ADDR Msg8
+ invoke StdOut,ADDR Msg20
+ invoke StdIn,ADDR TIB,LENGTHOF TIB ; await Enter Key
+ invoke ExitProcess,0
+;
+; #########################################################################
+;
+Main proc
+  ; -------------------------------
+  ; console mode library procedures
+  ; -------------------------------
+  invoke StdOut,ADDR Msg9
+;
+ret
+;
+Main endp
+;
+; _________________________________________________________________________________
+;  SYSTEM VARIABLES DEFINED ALL VERIFIED
+;
+ENDOFLINE:
+DD 0000 
+DD do_ENDOFLINE
+DB  9, 'ENDOFLINE'
+do_ENDOFLINE:
+NEXTC
+;
+_PAD:
+DD ENDOFLINE
+DD do_PAD
+DB 3, 'PAD'
+do_PAD:
+LEA EAX, PAD
+PUSH EAX 
+NEXTC
+;
+_SCRATCH:
+DD _PAD
+DD do_SCRATCH
+DB 7, 'SCRATCH'
+do_SCRATCH:
+LEA EAX, SCRATCH
+PUSH EAX 
+NEXTC
+;
+_HLD:               
+DD _SCRATCH
+DD do_HLD
+DB 3, 'HLD'
+do_HLD:
+LEA EAX, HLD
+PUSH EAX 
+NEXTC
+;
+_STATE:
+DD _HLD
+DD do_STATE
+DB 5, 'STATE'
+do_STATE:
+LEA EAX, STATE
+PUSH EAX 
+NEXTC
+;
+_BL:                    ; SHOULD BE DEFINED AS A FORTH CONSTANT
+DD _STATE
+DD do_BL
+DB 2, 'BL'
+do_BL:
+push 32
+NEXTC
+;
+_BASE:
+DD _BL
+DD do_BASE
+DB 4, 'BASE'
+do_BASE:
+LEA EAX, BASE
+PUSH EAX 
+NEXTC
+;
+venum: ; negate value flag
+DD _BASE
+DD do_venum
+DB 6, 'VENUM?'
+do_venum:
+LEA EAX, VENUMQ
+PUSH EAX
+NEXTC
+;
+Gone:
+DD venum
+DD do_Gone
+DB 4, 'GONE'
+do_Gone:
+LEA EAX, gone
+PUSH EAX
+NEXTC
+;
+_POC:
+DD Gone
+DD do_POC
+DB 3, 'POC' 
+do_POC:
+LEA EAX, POC
+PUSH EAX
+NEXTC
+;
+_DPR:
+DD _POC
+DD do_DPR
+DB 3, 'DPR'
+do_DPR:
+LEA EAX, DPR
+PUSH EAX 
+NEXTC
+;
+_FINDFLAG:
+DD _DPR
+DD do_FFLAG
+DB 5, 'FFLAG'
+do_FFLAG:
+LEA EAX, FFLAG
+PUSH EAX 
+NEXTC
+;
+_LFA:
+DD _FINDFLAG
+DD do_LFA
+DB 3, 'LFA'
+do_LFA:
+LEA EAX, LFA
+PUSH EAX 
+NEXTC
+;
+_NFA:
+DD _LFA
+DD do_NFA
+DB 3, 'NFA'
+do_NFA:
+MOV EAX, NFA
+PUSH EAX 
+NEXTC
+;
+_CFA:
+DD _NFA
+DD do_CFA
+DB 3, 'CFA'
+do_CFA:
+MOV EAX, CFA
+PUSH EAX 
+NEXTC
+;
+_PFA:
+DD _CFA
+DD do_PFA
+DB 3, 'PFA'
+do_PFA:
+MOV EAX, PFA
+PUSH EAX 
+NEXTC
+;
+__IN:
+DD _PFA
+DD do_IN
+DB 3, '_IN'
+do_IN:
+LEA EAX, _IN
+PUSH EAX 
+NEXTC
+;
+_S_LEN:
+DD __IN
+DD do_S_LEN
+DB 5, 'S_LEN'
+do_S_LEN:
+LEA EAX, S_LEN
+PUSH EAX 
+NEXTC
+;
+_S_MAX:
+DD __IN
+DD do_SMAX
+DB 4, 'SMAX'
+do_SMAX:
+LEA EAX, SMAX
+PUSH EAX 
+NEXTC
+;
+_S0:
+DD _S_MAX
+DD do_S0
+DB 2, 'S0'
+do_S0:
+LEA EAX, S0
+PUSH EAX 
+NEXTC
+;
+_TV1:
+DD _S0
+DD do_TV1
+DB 3, 'TV1'
+do_TV1:
+LEA EAX, TV1
+PUSH EAX 
+NEXTC
+;
+_TV2:
+DD _TV1
+DD do_TV2
+DB 3, 'TV2'
+do_TV2:
+LEA EAX, TV2
+PUSH EAX 
+NEXTC
+;
+_TV3:
+DD _TV2
+DD do_TV3
+DB 3, 'TV3'
+do_TV3:
+LEA EAX, TV3
+PUSH EAX 
+NEXTC
+;
+_DCW:
+DD _TV3
+DD do_DCW
+DB 3, 'DCW'
+do_DCW:
+LEA EAX, DCW
+PUSH EAX 
+NEXTC
+;
+_KEYIN:
+DD _DCW
+DD do_KEYIN
+DB 5, 'KEYIN'
+do_KEYIN:
+LEA EAX, KEYIN
+PUSH EAX 
+NEXTC
+;
+hMemory:
+DD _KEYIN
+DD do_HMEM
+DB 4, 'HMEM'
+do_HMEM:
+LEA EAX, _hMemory
+PUSH EAX 
+NEXTC
+;
+_pMem:
+DD hMemory
+DD do_PMEM
+DB 4, 'PMEM'
+do_PMEM:
+LEA EAX, pMem
+PUSH EAX 
+NEXTC
+;
+_CRLF:
+DD _pMem
+DD do_CRLF
+DB 4, 'CRLF'
+do_CRLF:
+LEA EAX, crlf$
+PUSH EAX 
+NEXTC
+;
+_MSG3:
+DD _CRLF
+DD do_MSG3
+DB 4, 'MSG3'
+do_MSG3:
+LEA EAX, Msg3
+PUSH EAX 
+NEXTC
+;
+_MSG4:
+DD _MSG3
+DD do_MSG4
+DB 4, 'MSG4'
+do_MSG4:
+LEA EAX, Msg4
+PUSH EAX 
+NEXTC
+;
+_MSG22:
+DD _MSG3
+DD do_MSG22
+DB 4, 'MSG22'
+do_MSG22:
+LEA EAX, Msg22
+PUSH EAX 
+NEXTC
+;
+_STACKERROR:
+DD _MSG22
+DD do_SERROR
+DB 10, 'STACKERROR'
+do_SERROR:
+LEA EAX, STACKERROR
+PUSH EAX 
+NEXTC
+;
+_ABORTFLAG:
+DD _STACKERROR
+DD do_ABFLG
+DB 9, 'ABORTFLAG'
+do_ABFLG:
+LEA EAX, ABORTFLAG
+PUSH EAX
+NEXTC
+;
+_SEP1:
+DD _ABORTFLAG
+DD do_SEP1
+DB 5,'SEP1$'
+do_SEP1:
+LEA EAX, SEP1$
+PUSH EAX
+NEXTC
+;
+_FCOUNTER:
+DD _SEP1
+DD do_FCOUNTER
+DB 8, 'FCOUNTER'
+do_FCOUNTER:
+LEA EAX, FCOUNTER
+PUSH EAX
+NEXTC
+;
+_MALADDR:
+DD _FCOUNTER
+DD do_MALADDR
+DB 11, 'MALLOCHADDR'
+do_MALADDR:
+LEA EAX, MALLOCHADDR
+PUSH EAX
+NEXTC
+;
+; ________________________________________________________________
+;                       END OF SYSTEM VARIABLE SECTION
+; ________________________________________________________________
+;                       Dictionary Begins
+; -------------------- PRIMITIVES CORE CODE ----------------------
+;
+_NULL:              ; VERIFIED
+DD _MALADDR
+DD do_NULL
+DB 4, 'NULL'
+do_NULL:
+NEXTC
+;
+_COLD:      ; VERIFIED
+DD _NULL 
+DD do_COLD
+DB  4, 'COLD'
+do_COLD:
+PUSH ESP
+POP S0                          ; Saving Stack Pointer Base 
+MOV EBP, [RSP]                  ; RETURN STACK POINTER
+LEA EAX, h_COMPILE
+PUSH EAX
+POP LATEST
+LEA EAX, USER_BASE
+PUSH EAX
+POP DPR
+MOV STATE, 0                    ;  Interpreter mode
+    LEA EAX, USER_BASE          ; Calc Data SPACE USED 
+    LEA ECX, DSB
+    SUB EAX, ECX
+    MOV TV1, EAX                ; Need to convert value to string & display
+    MOV EAX, EOC                ; Calc Core SPACE USED 
+    SUB EAX, Forth_Thread
+    MOV TV2, EAX                ; Need to convert value to string & display
+    MOV EAX, MEMLIMIT
+    SUB EAX, DPR                ; Calc Free Application space 
+    MOV TV3, EAX                ; Need to convert value to string & display
+    LEA EAX, PAD                ; RESET PAD POINTER
+    MOV HLD, EAX
+    call GetProcessHeap 
+    MOV MALLOCHADDR, EAX        ; heap address save in varIABLE
+NEXTC
+;
+_ABORT:             ; VERIFIED
+DD _COLD 
+DD do_ABORT
+DB  5, 'ABORT'
+do_ABORT:
+MOV STATE, 0
+PUSH $ + 10
+JMP do_DOCOL
+DD do_DECIMAL
+DD do_WDCOUNT, do_DCW, do_FETCH, do_PAD
+DD do_dwtoa, do_PAD, do_PUSH0, do_STDOUT
+DD do_CRLF, do_PUSH0, do_STDOUT
+DD do_CRLF, do_PUSH0, do_STDOUT
+DD do_PUSH0, do_ABFLG, do_STORE
+DD do_SEMI
+;
+_ABORT@:
+DD _ABORT
+DD do_ABORT@
+DB 7, '(ABORT)'
+do_ABORT@:
+MOV ABORTFLAG, -1
+LEA EDI, Forth_Thread + 4 ; Load DI with Forth_Thread
+NEXTC
+;
+_COLON:         ; VERIFIED
+DD _ABORT@      ; Link File Addess (LFA) Pointer to previous words
+DD do_COLON   ; CFA - Code Field Address
+DB 1, ':'       ; NFA - NAME FIELD
+do_COLON:
+DD do_NEWHEADER, do_GCFA, do_DOCOL, do_NFA, do_LIT, 4, do_MINUS,  do_STORE
+DD do_STATE, do_ON
+;
+_SCRINIT:
+DD _COLON
+DD do_SCRINIT
+DB 7, 'SCRINIT'
+do_SCRINIT:
+    invoke ClearScreen
+    invoke locate,xpos,ypos
+    invoke StdOut, ADDR Msg1 
+    invoke StdOut, ADDR Msg1A 
+    invoke StdOut, ADDR Msg2
+    invoke StdOut, ADDR crlf$
+    invoke StdOut, ADDR Msg12
+    invoke udw2str, TV1, HLD   ; Convert unsigned DWORD to string
+    invoke StdOut,  HLD
+    ADD HLD, 16
+    invoke StdOut, ADDR Msg15
+    invoke StdOut, ADDR Msg13
+    invoke udw2str, TV2, HLD   ; Convert unsigned DWORD to string
+    invoke StdOut,  HLD
+    ADD HLD, 16
+    invoke StdOut, ADDR Msg15
+    invoke StdOut, ADDR Msg14
+    invoke udw2str, TV3, HLD   ; Convert unsigned DWORD to string
+    invoke StdOut,  HLD
+    ADD HLD, 16
+    invoke StdOut, ADDR Msg16
+    invoke StdOut, ADDR Msg17
+NEXTC
+;
+_SEMI:      ; VERIFIED
+DD _SCRINIT
+DD do_SEMI
+DB 1, ';'
+do_SEMI:
+MOV EDI, [EBP]
+ADD EBP, 4
+NEXTC
+;
+_PUSH1:      ; ( -- 1 ) PUSH 1 onto data stack   ; VERIFIED
+DD _SEMI
+DD do_PUSH1
+DB 1, '1'    ; Name of Definition counted string name
+do_PUSH1: 
+PUSH 01H
+NEXTC        ; End of definition
+;
+_RS:  ; Restore Stack pointer to base (  --  )    VERIFIED
+DD _PUSH1
+DD do_RS
+DB 2, '..'
+do_RS:
+MOV ESP , S0
+NEXTC
+;
+_PUSH0: ;( -- 0 ) PUSH 0 onto stack  ; VERIFIED
+DD _RS
+DD do_PUSH0
+DB 1, '0'
+do_PUSH0:
+PUSH 0H
+NEXTC
+;
+SPACE: ; ( -- BL)   ; VERIFIED
+DD _PUSH0
+DD do_SPACE
+DB 2,'BL'
+do_SPACE:
+PUSH 32
+NEXTC
+;
+_LATEST: ; Returns address of the variable LATEST           ; VERIFIED
+DD SPACE
+DD do_LATEST
+DB 6,'LATEST'
+do_LATEST:
+LEA EAX, LATEST
+PUSH EAX
+NEXTC
+;
+_LAST: ; Returns header addr of Last Word in Dict
+DD _LATEST
+DD do_LAST
+DB 4,'LAST'
+do_LAST:
+MOV EAX, DWORD PTR [LATEST]
+PUSH EAX
+NEXTC
+;
+_COMPILE: ; ( XT -- )    compile xt following
+DD _LATEST
+DD do_COMPILE
+DB 7,'COMPILE'
+do_COMPILE:
+mov  ebx, [edi] ; ip  equ  <edi>  Instruction Pointer for Forth
+add  edi, 4
+NEXTC
+;
+;   -------------------- Memory Operators -------------------------------------
+;
+FETCH:  ; ( a1 -- n1 )  get the cell n1 from address a1    ; VERIFIED
+DD _COMPILE 
+DD do_FETCH
+DB 1, "@"
+do_FETCH: 
+    POP EBX 
+    mov ebx, 0 [ebx]
+    push ebx
+    NEXTC
+ ; 
+h_STORE:  ; ( n1 a1 -- )  store cell n1 into address a1   ; VERIFIED
+DD FETCH     
+DD do_STORE
+DB 1, "!"
+do_STORE: 
+    POP EAX 
+    POP EBX
+    MOV [EAX], EBX
+    NEXTC
+ ; 
+h_PLUSSTORE:      ; ( n1 a1 -- ) add cell n1 to the contents of address a1   ; VERIFIED
+DD h_STORE  
+DD do_PLUSSTORE
+DB 2, "+!"
+do_PLUSSTORE: 
+    POP EBX 
+    pop eax
+    add 0 [ebx], eax
+    NEXTC
+ ; 
+h_MINUSSTORE:      ; ( n1 a1 -- ) add cell n1 to the contents of address a1  ; VERIFIED
+DD h_PLUSSTORE  
+DD do_MINUSSTORE
+DB 2, "-!"
+do_MINUSSTORE: 
+    POP EBX 
+    pop eax
+    SUB 0 [ebx], eax
+    NEXTC
+ ;
+CFETCH:      ; ( a1 -- c1 )     ;    fetch the character c1 from address a1 VERIFIED
+DD h_MINUSSTORE 
+DD do_CFETCH
+DB 2, "C@"
+do_CFETCH: 
+    POP EBX 
+    movzx ebx, byte ptr 0 [ebx]
+    push ebx
+    NEXTC
+ ; 
+CSTORE:      ; ( c1 a1 -- )     ;    store character c1 into address a1     VERIFIED
+DD CFETCH 
+DD do_CSTORE
+DB 2, "C!"
+do_CSTORE: 
+    POP EBX 
+    pop eax
+    mov 0 [ebx], al
+    pop ebx
+    NEXTC
+ ; 
+CPLUSSTORE:    ; ( c1 a1 -- )     ;    add character c1 to the contents of address a1  VERIFIED
+DD CSTORE  
+DD do_CPLUSSTORE
+DB 3, "C+!"
+do_CPLUSSTORE: 
+    POP EBX 
+    pop eax
+    add 0 [ebx], al
+    NEXTC
+ ; 
+WFETCH:      ; ( a1 -- w1 )     ;    fetch the word ; (16bit) w1 from address a1
+DD CPLUSSTORE
+DD do_WFETCH
+DB 2, "W@"
+do_WFETCH: 
+    POP EBX 
+    movzx ebx, word ptr 0 [ebx]
+    push ebx
+    NEXTC
+ ; 
+SWFETCH:     ; ( a1 -- w1 )     ;    fetch and sign extend the word ; 
+DD WFETCH 
+DD do_SWFETCH
+DB 3, "SW@"
+do_SWFETCH: 
+    POP EBX 
+    movsx ebx, word ptr 0 [ebx]
+    push ebx
+    NEXTC
+ ; 
+WSTORE:      ; ( w1 a1 -- )     ;    store word ; (16bit) w1 into address a1
+DD SWFETCH 
+DD do_WSTORE
+DB 2, "W!"
+do_WSTORE: 
+    POP EBX 
+    pop eax
+    mov 0 [ebx], ax
+    pop ebx
+    NEXTC
+ ; 
+WPLUSSTORE:     ; ( w1 a1 -- )     ;    add word ; (16bit) w1 to the contents of address a1
+DD WSTORE
+DD do_WPLUSSTORE
+DB 3, "W+!"
+do_WPLUSSTORE: 
+    POP EBX 
+    pop eax
+    add 0 [ebx], ax
+    pop ebx
+    NEXTC
+; 
+MEMQ:                   ; ( -- n ) Checks memory useage limit  VERIFIED
+DD WPLUSSTORE
+DD do_MEMQ
+DB 4, 'MEM?'
+do_MEMQ:
+MOV EAX, MEMLIMIT
+SUB EAX, DPR
+PUSH EAX
+NEXTC
+;
+;    -------------------- Char Operators ---------------------------------------
+
+h_CHARS:  ; ( n1 -- n1*char )  ;    multiply n1 by the character size ; (1)  VERIFIED
+DD MEMQ
+DD do_CHARS
+DB 5, "CHARS"
+do_CHARS: 
+    NEXTC
+ ; 
+CHARPLUS:  ; ( a1 -- a1+char )  ;    add the characters size in bytes to a1  VERIFIED
+DD h_CHARS 
+DD do_CHARPLUS
+DB 5, "CHAR+"
+do_CHARPLUS: 
+    POP EBX 
+    add ebx, 1
+    push ebx
+    NEXTC
+; 
+;    -------------------- Arithmetic Operators ---------------------------------
+;
+_PLUS:   ; ( n1 n2 -- n3 )  add n1 to n2, return sum n3   ; VERIFIED
+DD CHARPLUS     
+DD do_PLUS
+DB 1, "+"
+do_PLUS: 
+    POP EBX   ; n2
+    pop eax   ; n1
+    add eax, ebx   ; N1 + N2
+    PUSH EAX
+    NEXTC
+ ; 
+MINUS:   ; ( n1 n2 -- n3 ) subtract n2 from n1, return difference n3   ; VERIFIED
+DD _PLUS 
+DD do_MINUS
+DB 1, "-"
+do_MINUS: 
+    POP EBX ; n2
+    pop eax ; n1
+    sub eax, ebx ; n1 - n2
+    push eax
+    NEXTC
+ ; 
+UNDERPLUS:   ; ( a x b -- a+b x )  ;    add top of stack to third stack item    VERIFIED
+DD MINUS 
+DD do_UNDERPLUS
+DB 6, "UNDER+"
+do_UNDERPLUS: 
+    POP EBX 
+    add 4 [esp], ebx
+    NEXTC
+ ; 
+_NEGATE:   ; ( n1 -- n2 )  ;    negate n1, returning 2's complement n2  VERIFIED
+DD UNDERPLUS  
+DD do_NEGATE
+DB 6, "NEGATE"
+do_NEGATE: 
+    POP EBX 
+    neg ebx
+    push ebx
+    NEXTC
+ ; 
+_ABS:     ; ( n -- |n| )  ;    return the absolute value of n1 as n2    VERIFIED
+DD _NEGATE 
+DD do_ABS
+DB 3, "ABS"
+do_ABS: 
+    POP EBX 
+    mov ecx, ebx  ;    save value
+    sar ecx, 31  ;    x < 0 ? 0xffffffff : 0
+    xor ebx, ecx  ;    x < 0 ? ~x : x
+    sub ebx, ecx  ;    x < 0 ? ; (~x)+1 : x
+    push ebx
+    NEXTC
+ ; 
+_2TIMES:      ; ( n1 -- n2 )  ;    multiply n1 by two       VERIFIED
+DD _ABS 
+DD do_2TIMES
+DB 2, "2*"
+do_2TIMES: 
+    POP EBX 
+    add ebx, ebx
+    push ebx
+    NEXTC
+ ; 
+_2DIVIDE:      ; ( n1 -- n2 )  ;    signed divide n1 by two     VERIFIED
+DD _2TIMES 
+DD do_2DIVIDE
+DB 2, "2/"
+do_2DIVIDE: 
+    POP EBX 
+    sar ebx, 1
+    push ebx
+    NEXTC
+ ; 
+U2DIVIDE:     ; ( n1 -- n2 )  ;    unsigned divide n1 by two
+DD _2DIVIDE 
+DD do_U2DIVIDE
+DB 3, "U2/"
+do_U2DIVIDE: 
+    POP EBX 
+    shr ebx, 1
+    PUSH EBX
+    NEXTC
+ ; 
+_1PLUS:     ; ( n1 -- n2 )  add one to n1   ; VERIFIED
+DD U2DIVIDE
+DD do_1PLUS
+DB 2, "1+"
+do_1PLUS: 
+    POP EBX 
+    add ebx, 1
+    push ebx
+    NEXTC
+ ; 
+_1MINUS:      ; ( n1 -- n2 )  subtract one from n1    ; VERIFIED
+DD _1PLUS
+DD do_1MINUS
+DB 2, "1-"
+do_1MINUS: 
+    POP EBX 
+    sub ebx, 1
+    push ebx
+    NEXTC
+ ; 
+D2TIMES:     ; ( d1 -- d2 )  ;    multiply the double number d1 by two
+DD _1MINUS
+DD do_D2TIMES
+DB 3, "D2*"
+do_D2TIMES: 
+    POP EBX 
+    pop eax
+    shl eax, 1
+    rcl ebx, 1
+    push eax
+    PUSH EBX
+    NEXTC
+ ; 
+D2DIVIDE:     ; ( d1 -- d2 )  ;    divide the double number d1 by two
+DD D2TIMES
+DD do_D2DIVIDE
+DB 3, "D2/"
+do_D2DIVIDE: 
+    POP EBX 
+    pop eax
+    sar ebx, 1
+    rcr eax, 1
+    push eax
+    PUSH EBX
+    NEXTC
+ ; 
+RROT32:  	; ( n1 n2 -- ror) ; ( 32 Bit Rotation of word right)
+DD D2DIVIDE
+DD do_RROT32
+DB 6, "RROT32"
+do_RROT32: 
+ POP ECX
+ POP EBX
+ ror ebx, cl
+ push ebx
+    NEXTC
+ ; 
+LROT32:  	; ( n1 n2 -- rol) ; ( 32 Bit Rotation of word left)
+DD RROT32
+DD do_LROT32
+DB 6, "LROT32"
+do_LROT32: 
+ POP ECX 
+ pop ebx
+ rol ebx, cl
+ push ebx
+    NEXTC
+ ; 
+_GETADDR:  	; ( addr1, size, count -- addr2 )  ;    for an array
+DD LROT32 
+DD do_GETADDR
+DB 7, "GETADDR"
+do_GETADDR: 
+    POP EAX 
+	pop ebx
+	push edx
+	imul ebx
+	pop edx
+	pop ebx
+	add eax, ebx
+	push eax
+    NEXTC
+;
+LIT:  ; ( -- n )  push the literal value following LIT in the ; VERIFIED
+DD _GETADDR
+DD do_LIT
+DB 3, "LIT"
+do_LIT:              ;  PUSH onto the data stack
+    mov ebx, [EDI]
+    PUSH EBX
+    ADD EDI , 4
+    NEXTC
+ ; 
+DROP:  ; ( n -- )   discard top entry on data stack   ; VERIFIED
+DD LIT  
+DD do_DROP
+DB 4, "DROP"
+do_DROP: 
+    POP EBX 
+    NEXTC
+ ; 
+h_DUP:     ; ( n -- n n )    duplicate top entry on data stack   ; VERIFIED
+DD DROP  
+DD do_DUP
+DB 3, "DUP"
+do_DUP: 
+    MOV EBX , 0 [ESP] 
+    push ebx
+    NEXTC
+ ; 
+SWAP:  ; ( n1 n2 -- n2 n1 )  exchange first and second items on data stack  ; VERIFIED
+DD h_DUP  
+DD do_SWAP
+DB 4, "SWAP"
+do_SWAP: 
+    POP EBX 
+    mov eax, [esp]
+    mov [esp], ebx
+    mov ebx, eax
+    PUSH EBX
+    NEXTC
+ ; 
+OVER:  ; ( n1 n2 -- n1 n2 n1 )  copy second item to top of data stack   ; VERIFIED
+DD SWAP
+DD do_OVER
+DB 4, "OVER"
+do_OVER: 
+    mov ebx, 4 [esp]
+    PUSH EBX
+    NEXTC
+ ; 
+ROT:     ; ( n1 n2 n3 -- n2 n3 n1 )  rotate third item to top of data stack ; VERIFIED
+DD OVER 
+DD do_ROT
+DB 3, "ROT"
+do_ROT: 
+    POP EBX 
+    mov ecx, 0 [esp]
+    mov eax, 4 [esp]
+    mov 0 [esp], ebx
+    mov 4 [esp], ecx
+    mov ebx, eax
+    PUSH EBX
+    NEXTC
+ ; 
+MINUSROT:  ; ( n1 n2 n3 -- n3 n1 n2 )  ;    rotate top of data stack to third item  VERIFIED
+DD ROT   
+DD do_MINUSROT
+DB 4, "-ROT"
+do_MINUSROT: 
+    POP EBX 
+    mov ecx, 4 [esp]
+    mov eax, 0 [esp]
+    mov 4 [esp], ebx
+    mov 0 [esp], ecx
+    mov ebx, eax
+    PUSH EBX
+    NEXTC
+ ; 
+IFDUP:  ; ( n -- n [n] )  ;    duplicate top of data stack if non-zero      VERIFIED
+DD MINUSROT
+DD do_IFDUP
+DB 4, "?DUP"
+do_IFDUP: 
+    POP EBX 
+    PUSH EBX
+    test    ebx, ebx
+    je short @@1A
+    push    ebx
+@@1A:
+    NEXTC
+ ; 
+NIP:     ; ( n1 n2 -- n2 )  ;    discard second item on data stack      VERIFIED
+DD IFDUP 
+DD do_NIP
+DB 3, "NIP"
+do_NIP: 
+    POP EBX 
+    POP EAX
+    PUSH EBX
+    NEXTC
+ ; 
+TUCK:  ; ( n1 n2 -- n2 n1 n2 )  ;    copy top data stack to under second item      VERIFIED 
+DD NIP       ; SWAP OVER
+DD do_TUCK
+DB 4, "TUCK"
+do_TUCK: 
+    POP EBX
+    PUSH 0 [ESP]
+    MOV 4 [ESP], EBX
+    PUSH EBX
+    NEXTC
+ ; 
+h_PICK:  ; ( ... k -- ... n[k] )   VERIFIED     
+DD TUCK 
+DD do_PICK
+DB 4, "PICK"
+do_PICK: 
+    POP EBX 
+    mov ebx, 0 [esp] [ebx*4]  ;    just like that!
+    PUSH EBX
+    NEXTC
+; 
+;   -------------------- Double Arithmetic Operators --------------------------
+StoD:       ; ( n1 -- d1 )   convert single signed single n1 to a signed double d1
+DD h_PICK 
+DD do_StoD
+DB 3, 'S>D'
+do_StoD:
+    pop     ebx
+    push    ebx
+    shl     ebx, 1         ;   put sign bit into carry
+    sbb     ebx, ebx
+    push    ebx
+    NEXTC
+;
+;    -------------------- Cell Operators ---------------------------------------
+
+_CELL:  ; ( -- 4 ) cell size        ; VERIFIED
+DD StoD  
+DD do_CELL
+DB 4, "CELL"
+do_CELL: 
+    PUSH 4
+    NEXTC
+ ; 
+_CELLS:  ; ( n1 -- n1*cell )  ;    multiply n1 by the cell size     ; VERIFIED
+DD _CELL 
+DD do_CELLS
+DB 5, "CELLS"
+do_CELLS: 
+    POP EBX 
+    shl ebx, 2
+    PUSH EBX
+    NEXTC
+ ; 
+CELLSPLUS:  ; ( a1 n1 -- a1+n1*cell )  ;    multiply n1 by the cell size and add  ; VERIFIED
+DD _CELLS  
+DD do_CELLSPLUS
+DB 6, "CELLS+"
+do_CELLSPLUS: 
+    POP EBX 
+     ;    the result to address a1
+    pop eax
+    lea ebx, 0 [ebx*4] [eax]
+    PUSH EBX
+    NEXTC
+ ; 
+CELLSMINUS:  ; ( a1 n1 -- a1-n1*cell )  ;    multiply n1 by the cell size and subtract  ; VERIFIED
+DD CELLSPLUS 
+DD do_CELLSMINUS
+DB 6, "CELLS-"
+do_CELLSMINUS: 
+    POP EBX 
+     ;    the result from address a1
+    lea eax, 0 [ebx*4]
+    pop ebx
+    sub ebx, eax
+    PUSH EBX
+    NEXTC
+ ; 
+CELLPLUS:  ; ( a1 -- a1+cell )  ;    add a cell to a1  ; VERIFIED
+DD CELLSMINUS  
+DD do_CELLPLUS
+DB 5, "CELL+"
+do_CELLPLUS: 
+    POP EBX 
+    add ebx, 4
+    PUSH EBX
+    NEXTC
+ ; 
+CELLMINUS:  ; ( a1 -- a1-cell )  ;    subtract a cell from a1  ; VERIFIED
+DD CELLPLUS 
+DD do_CELLMINUS
+DB 5, "CELL-"
+do_CELLMINUS: 
+    POP EBX 
+    sub ebx, 4
+    PUSH EBX
+    NEXTC
+ ; 
+PLUSCELLS:  ; ( n1 a1 -- n1*cell+a1 )  ;    multiply n1 by the cell size and add ; VERIFIED
+DD CELLMINUS  
+DD do_PLUSCELLS
+DB 6, "+CELLS"
+do_PLUSCELLS: 
+    POP EBX 
+     ;    the result to address a1
+    pop eax
+    lea ebx, 0 [eax*4] [ebx]
+    PUSH EBX
+    NEXTC
+ ; 
+MINUSCELLS:  ; ( n1 a1 -- a1-n1*cell )  ;    multiply n1 by the cell size and ; VERIFIED
+DD PLUSCELLS  
+DD do_MINUSCELLS
+DB 6, "-CELLS"
+do_MINUSCELLS: 
+    POP EBX 
+     ;    subtract the result from address a1
+    pop eax
+    shl eax, 2
+    sub ebx, eax
+    PUSH EBX
+    NEXTC
+; 
+;    -------------------- Stack Operations -------------------------------------
+;
+_DEPTH:         ; ( -- n ) return the current data stack depth (n excluded)  ; VERIFIED
+DD MINUSCELLS
+DD do_DEPTH
+DB 5, 'DEPTH'
+do_DEPTH:
+    mov     ebx, S0 
+    sub     ebx, esp
+    sar     ebx, 2  ; shift right two is divide by 4
+    PUSH EBX
+    NEXTC
+;
+SPFETCH:     ; ( -- addr )  ;    get addr, the pointer to the top item on data stack  ; VERIFIED
+DD _DEPTH    
+DD do_SPFETCH
+DB 3, "SP@"
+do_SPFETCH: 
+    PUSH ESP
+    NEXTC
+ ;  
+SPSTORE:     ; ( addr -- )  ;    set the data stack to point to addr   ; VERIFIED
+DD SPFETCH  
+DD do_SPSTORE
+DB 3, "SP!"
+do_SPSTORE: 
+    POP EBX 
+    mov esp, ebx
+    NEXTC
+ ; 
+RPFETCH:     ; ( -- a1 )  ;    get a1 the address of the return stack   ; VERIFIED
+DD SPSTORE     
+DD do_RPFETCH
+DB 3, "RP@"
+do_RPFETCH: 
+    PUSH EBP
+    NEXTC
+ ; 
+RPSTORE:     ; ( a1 -- )  ;    set the address of the return stack   ; VERIFIED
+DD RPFETCH 
+DD do_RPSTORE
+DB 3, "RP!"
+do_RPSTORE: 
+    POP EBX 
+    mov EBP, ebx
+    NEXTC
+ ; 
+TOR:      ; ( n1 -- ) ; ( R: -- n1 )  push n1 onto the return stack   ; VERIFIED
+DD RPSTORE  
+DD do_TOR
+DB 2, ">R"
+do_TOR: 
+POP EAX
+SUB EBP, 4
+MOV [EBP], EAX
+NEXTC
+ ; 
+FROMR:      ; ( -- n1 ) ; ( R: n1 -- )  ;    pop n1 off the return stack  ; VERIFIED
+DD TOR      
+DD do_FROMR
+DB 2, "R>"
+do_FROMR: 
+MOV EAX, [EBP] 
+PUSH EAX
+ADD EBP, 4
+NEXTC
+ ; 
+RFETCH:      ; ( -- n1 ) ; ( R: n1 -- n1 )  ;    get a copy of the top of the return stack  ; VERIFIED
+DD FROMR
+DD do_RFETCH
+DB 2, "R@"
+do_RFETCH: 
+MOV EAX, [EBP]
+PUSH EAX
+NEXTC
+ ; 
+DUPTOR:  ; ( n1 -- n1 ) ; ( R: -- n1 )  ;    push a copy of n1 onto the return stack  ; VERIFIED
+DD RFETCH 
+DD do_DUPTOR
+DB 5, "DUP>R"
+do_DUPTOR: 
+    mov ebx, [ESP]
+    SUB EBP, 4
+    mov [EBP], ebx
+    NEXTC
+ ; 
+RFROMDROP:  ; ( -- ) ; ( R: n1 -- )  ;    discard one item off of the return stack  ; VERIFIED
+DD DUPTOR     
+DD do_RFROMDROP
+DB 6, "R>DROP"
+do_RFROMDROP: 
+    ADD EBP, 4
+    NEXTC
+ ; 
+_2TOR:     ; ( n1 n2 -- ) ; ( R: -- n1 n2 )  ;    push two items onto the return stack  ; VERIFIED
+DD RFROMDROP 
+DD do_2TOR
+DB 3, "2>R"
+do_2TOR: 
+    POP EBX
+    SUB EBP, 4
+    MOV [EBP], EBX
+    POP EBX
+    SUB EBP, 4
+    MOV [EBP], EBX
+    NEXTC
+ ; 
+_2RFROM:    ; ( -- n1 n2 ) ; ( R: n1 n2 -- )  ;    pop two items off the return stack  ; VERIFIED
+DD _2TOR  
+DD do_2RFROM
+DB 3, "2R>"
+do_2RFROM: 
+    PUSH [EBP]
+    ADD EBP, 4
+    PUSH [EBP]
+    ADD EBP, 4
+    NEXTC
+ ; 
+_2RFETCH:     ; ( -- n1 n2 )     ;    get a copy of the top two items on the return stack  ; VERIFIED
+DD _2RFROM  
+DD do_2RFETCH
+DB 3, "2R@"
+do_2RFETCH: 
+   PUSH [EBP]
+   PUSH [EBP+4]
+   NEXTC
+ ; 
+_2DUP:     ; ( N1 N2 -- N1 N2 n1 n2 )  DUPLICATE TOP 2 ITEMS ON STACK       ; VERIFIED
+DD _2RFETCH  
+DD do_2DUP
+DB 4, "2DUP"
+do_2DUP: 
+    MOV EBX , 4 [ESP]
+    MOV EAX , 0 [ESP]
+    PUSH EBX
+    PUSH EAX
+    NEXTC
+ ; 
+_2DROP:     ; ( n1 n2 -- )  DROP TOP 2 ITEMS ON STACK ; VERIFIED
+DD _2DUP 
+DD do_2DROP
+DB 5, "2DROP"
+do_2DROP: 
+    ADD ESP, 8
+    NEXTC
+;
+;   -------------------- Comparison Operators ---------------------------------
+
+EQU0:          ; ( n1 -- f1 )      return true if n1 equals zero  ; VERIFIED
+DD _2DROP
+DD do_EQU0
+DB 2, "0="
+do_EQU0:
+    POP EBX
+    sub     ebx,  1
+    sbb     ebx, ebx
+	push ebx
+    NEXTC
+ ;
+_0NE:         ; v( n1 -- f1 )      return true if n1 is not equal to zero  ; VERIFIED
+DD EQU0
+DD do_0NE
+DB 3, "0<>"
+do_0NE:
+    POP EBX
+    sub     ebx, 1
+    sbb     ebx, ebx
+    not     ebx
+	push ebx
+    NEXTC
+ ;
+_0LT:         ; ( n1 -- f1 )      return true if n1 is less than zero  ; VERIFIED
+DD _0NE
+DD do_0LT
+DB 2, "0<"
+do_0LT:
+    POP EBX
+    sar ebx,  31
+	push ebx
+    NEXTC
+ ;
+_0GT:          ; ( n1 -- f1 )      return true (-1) if n1 is greater than zero  ; VERIFIED
+DD _0LT
+DD do_0GT
+DB 2, "0>"
+do_0GT:
+    POP EBX
+    dec     ebx
+    cmp     ebx, 7fffffffh
+    sbb     ebx, ebx
+	push ebx
+    NEXTC
+ ;
+_EQU:          ; ( n1 n2 -- f1 )   return true (-1) if n1 is equal to n2  ; VERIFIED
+DD _0GT
+DD do_EQU
+DB 1, "="
+do_EQU:
+    POP EBX
+    pop     eax
+    sub     ebx, eax
+    sub     ebx, 1
+    sbb     ebx, ebx
+	push ebx
+    NEXTC
+ ;
+_NEQ:         ; ( n1 n2 -- f1 )   return true if (-1) n1 is not equal to n2  ; VERIFIED
+DD _EQU
+DD do_NEQ
+DB 2, "<>"
+do_NEQ:
+    POP EBX
+    pop     eax
+    sub     eax, ebx
+    neg     eax
+    sbb     ebx, ebx
+	push ebx
+    NEXTC
+ ;
+_LT:          ; ( n1 n2 -- f1 )   return true if n1 is less than n2   ; VERIFIED
+DD _NEQ
+DD do_LT
+DB 1, "<"
+do_LT:
+    POP EBX
+    pop eax
+    cmp eax, ebx
+    jl short @@1
+    xor ebx, ebx
+	push ebx
+    NEXTC
+@@1:       
+    mov ebx, -1
+	push ebx
+    NEXTC
+ ;
+_GT:          ; ( n1 n2 -- f1 )   return true if n1 is greater than n2  ; VERIFIED
+DD _LT
+DD do_GT
+DB 1, ">"
+do_GT:
+    POP EBX
+    pop eax
+    cmp eax, ebx
+    jg  short @@1
+    xor ebx, ebx
+	push ebx
+    NEXTC
+ ;
+_LTE:         ; ( n1 n2 -- f1 )   return true if n1 is less than n2  ; VERIFIED 
+DD _GT
+DD do_LTE
+DB 2, "<="
+do_LTE:
+    POP EBX
+    pop eax
+    cmp eax, ebx
+    jle short @@1
+    xor ebx, ebx
+	push ebx
+    NEXTC
+;
+_GTE:        ;  ( n1 n2 -- f1 )   return true if n1 is greater than n2   ; VERIFIED
+DD _LTE
+DD do_GTE
+DB 2, ">="
+do_GTE:
+    POP EBX
+    pop eax
+    cmp eax, ebx
+    jge short @@1
+    xor ebx, ebx
+	push ebx
+    NEXTC
+ ;
+ULT:        ;  ( u1 u2 -- f1 )   return true if unsigned u1 is less than  
+DD _GTE
+DD do_ULT
+DB 2, "U<"
+do_ULT:
+    POP EBX  ;   unsigned u2
+    pop eax
+    cmp eax, ebx
+    sbb ebx, ebx
+	push ebx
+    NEXTC
+ ;
+UGT:         ; ( u1 u2 -- f1 )   return true if unsigned u1 is greater than
+DD ULT
+DD do_UGT
+DB 2, "U>"
+do_UGT:
+    POP EBX   ;   unsigned n2
+    pop eax
+    cmp ebx, eax
+    sbb ebx, ebx
+	push ebx
+    NEXTC
+ ;
+DULT:        ; ( ud1 ud2 -- f1 )   return true if unsigned double ud1 is
+DD UGT
+DD do_DULT
+DB 3, "DU<"
+do_DULT:
+    POP EBX ;   less than unsigned double ud2
+    pop     eax
+    pop     ecx
+    xchg    edx, 0 [esp]    ;  save UP
+    sub     edx, eax
+    sbb     ecx, ebx
+    sbb     ebx, ebx
+    pop     edx             ;  restore UP
+	push ebx
+    NEXTC
+ ;
+UMIN:       ; ( u1 u2 -- n3 )   return the lesser of unsigned u1 and
+DD DULT
+DD do_UMIN
+DB 4, "UMIN"
+do_UMIN:
+    POP EBX ;  unsigned u2
+    pop     eax
+    cmp     ebx, eax
+    jb      @@1UMN
+    mov     ebx, eax
+@@1UMN:
+	push ebx
+    NEXTC
+ ;
+_MIN:        ; ( n1 n2 -- n3 )   return the lesser of n1 and n2  ; VERIFIED
+DD UMIN
+DD do_MIN
+DB 3, "MIN"
+do_MIN:
+    POP     EBX
+    pop     eax
+    cmp     ebx, eax
+    jl      @@1MN
+    mov     ebx, eax
+@@1MN:
+	push    ebx
+    NEXTC
+ ;
+_UMAX:       ; ( u1 u2 -- n3 )   return the greater of unsigned u1 and U2   ; VERIFIED
+DD _MIN
+DD do_UMAX
+DB 4, "UMAX"
+do_UMAX:
+    POP EBX ;  unsigned u2
+     pop     eax
+     cmp     ebx, eax
+     ja      @@1UMX
+     mov     ebx, eax
+@@1UMX:
+	 push ebx
+    NEXTC
+ ;
+_MAX:       ;  ( n1 n2 -- n3 )   return the greater of n1 and n2   ; VERIFIED
+DD _UMAX
+DD do_MAX
+DB 3, "MAX"
+do_MAX:
+    POP EBX
+    pop     eax
+    cmp     ebx, eax
+    jg      @@1MX
+    mov     ebx, eax
+@@1MX:
+	push ebx
+    NEXTC
+ ;
+_0MAX:       ; ( n1 -- n2 )   return n2 the greater of n1 and zero   ; VERIFIED
+DD _MAX
+DD do_0MAX
+DB 4, "0MAX"
+do_0MAX:
+    POP EBX
+    cmp     ebx, 0
+    jg      @@10MX
+    xor     ebx, ebx
+@@10MX:
+	push ebx
+    NEXTC
+ ;
+_WITHIN:     ; ( n1 low high -- f1 )   f1=true if ( (n1 >= low) and (n1 < high) )   ; VERIFIED
+DD _0MAX
+DD do_WITHIN
+DB 6, "WITHIN"
+do_WITHIN:
+    POP EBX
+    pop     eax
+    pop     ecx
+    sub     ebx, eax
+    sub     ecx, eax
+    sub     ecx, ebx
+    sbb     ebx, ebx
+	push ebx
+    NEXTC
+ ;
+_BETWEEN:     ; ( n1 low high -- f1 )   f1=true if ( (n1 >= low) and (n1 <= high) )   ; VERIFIED
+DD _WITHIN
+DD do_BETWEEN
+DB 7, "BETWEEN"
+do_BETWEEN:
+    POP EBX
+    add     ebx, 1      ;  bump high
+    pop     eax
+    pop     ecx
+    sub     ebx, eax
+    sub     ecx, eax
+    sub     ecx, ebx
+    sbb     ebx, ebx
+	push ebx
+    NEXTC
+;
+
+;   -------------------- Double memory Operators ------------------------------
+
+_2FETCH:          ; ( a1 -- d1 )   fetch the double number d1 from address a1
+DD _BETWEEN
+DD do_2FETCH
+DB 2, "2@"
+do_2FETCH:
+    POP EBX
+    push    4 [ebx]
+     mov     ebx, 0 [ebx]
+	push ebx
+    NEXTC
+ ;
+_2STORE:          ; ( d1 a1 -- )   store the double number d1 into address a1
+DD _2FETCH
+DD do_2STORE
+DB 2, "2!"
+do_2STORE:
+    POP EBX
+    pop     0 [ebx]
+    pop     4 [ebx]
+    pop     ebx
+    NEXTC
+;
+
+;   -------------------- Double Stack Operators -------------------------------
+
+_2NIP:       ;  ( n1 n2 n3 n4 -- n3 n4 )   discard third and fourth items from data stack  ; VERIFIED
+DD _2STORE
+DD do_2NIP
+DB 4, "2NIP"
+do_2NIP:
+    POP EBX
+    pop     eax
+    mov     4 [esp], eax
+    pop     eax
+	push ebx
+    NEXTC
+ ;
+_2SWAP:      ; ( n1 n2 n3 n4 -- n3 n4 n1 n2 )   exchange the two topmost doubles  ; VERIFIED
+DD _2NIP
+DD do_2SWAP
+DB 5, "2SWAP"
+do_2SWAP:
+    POP EBX
+    mov     eax, 4 [esp]      ;  eax=n2
+    mov     ecx, 8 [esp]      ;  ecx=n1
+    mov     4 [esp], ebx      ;  n1 n4 n3 eax=n2 ecx=n1 ebx=n4
+    mov     ebx, 0 [esp]      ;  ebx=3
+    mov     0 [esp], ecx      ;  n3 n4 n1
+    mov     8 [esp], ebx      ;  n3 n4 n3
+    mov     ebx, eax          ;  n3 n4 n1 n2
+	push ebx
+    NEXTC
+ ;
+_2OVER:      ; ( n1 n2 n3 n4 -- n1 n2 n3 n4 n1 n2 )   copy second double on top  ; VERIFIED
+DD _2SWAP
+DD do_2OVER
+DB 5, "2OVER"
+do_2OVER:
+    POP EBX
+                mov     eax, 8 [esp]
+                push    ebx
+                push    eax
+                mov     ebx, 12 [esp]
+		push ebx
+    NEXTC
+ ;
+_2ROT:       ; ( n1 n2 n3 n4 n5 n6 -- n3 n4 n5 n6 n1 n2 )   VERIFIED
+DD _2OVER
+DD do_2ROT
+DB 4, "2ROT"
+do_2ROT:
+    POP EBX
+                pop     eax
+                xchg    ebx, 0 [esp]
+                xchg    eax, 4 [esp]
+                xchg    ebx, 8 [esp]
+                xchg    eax, 12 [esp]
+                push    eax
+		push ebx
+    NEXTC
+ ;
+_3DROP:      ; ( n1 n2 n3 -- )   discard three items from the data stack  ; VERIFIED 
+DD _2ROT
+DD do_3DROP
+DB 5, "3DROP"
+do_3DROP:
+    add     esp, 12
+    NEXTC
+ ;
+_4DROP:      ; ( n1 n2 n3 n4 -- )   discard four items from the data stack   ; VERIFIED
+DD _3DROP
+DD do_4DROP
+DB 5, "4DROP"
+do_4DROP:
+    add     esp, 16
+    NEXTC
+ ;
+_3DUP:       ; ( n1 n2 n3 -- n1 n2 n3 n1 n2 n3 )   duplicate 3 topmost cells  ; VERIFIED
+DD _4DROP
+DD do_3DUP
+DB 4, "3DUP"
+do_3DUP:
+    POP EBX
+                mov     eax, 0 [esp]      ;  n2
+                mov     ecx, 4 [esp]      ;  n1
+                push    ebx               ;  n3
+                push    ecx               ;  n1
+                push    eax               ;  n2
+		push ebx
+    NEXTC
+ ;
+_4DUP:       ; ( a b c d -- a b c d a b c d )   duplicate 4 topmost cells  ; VERIFIED
+DD _3DUP
+DD do_4DUP
+DB 4, "4DUP"
+do_4DUP:
+    POP EBX
+    mov     eax, 8 [esp]
+    push    ebx
+    push    eax
+    mov     ebx, 12 [esp]
+    mov     eax, 8 [esp]
+    push    ebx
+    push    eax
+    mov     ebx, 12 [esp]
+	push ebx
+    NEXTC
+;
+; \ -------------------- Signed Multiply & Divide -----------------------------
+
+_MMULT:           ; CODE M*         ( n1 n2 -- d1 )     VERIFIED 231202
+DD _4DUP          ; \ multiply n1 by n2, return double result d1
+DD do_MMULT
+DB 2, 'M*'
+do_MMULT:
+   POP EBX
+   mov     ecx, edx        ;\ save UP
+   pop     eax
+   imul    ebx
+   push    eax
+   mov     ebx, edx
+   mov     edx, ecx        ;\ restore UP
+   PUSH EBX
+   NEXTC
+;
+_MULT:                      ; CODE *          ( n1 n2 -- n3 )   VERIFIED 231202
+DD _MMULT                   ; \ multiply n1 by n2, return single result n3
+DD do_MULT
+DB 1, '*'
+do_MULT:
+   POP EBX
+   mov     ecx, edx       ; \ save UP
+   pop     eax
+   mul     ebx
+   mov     ebx, eax
+   mov     edx, ecx       ; \ restore UP
+   PUSH EBX
+   NEXTC
+;
+comment ~
+
+CODE SM/REM     ( d n -- rem quot )
+                mov     ecx, edx        \ save UP
+                pop     edx
+                pop     eax
+                idiv    ebx
+                push    edx
+                mov     ebx, eax
+                mov     edx, ecx        \ restore UP
+                next    c;
+
+CODE FM/MOD     ( d n -- rem quot )
+                pop     ecx             \ high numerator
+                mov     eax, ecx        \ copy for testing
+                xor     eax, ebx        \ test against denominator
+                jns     short @@1       \ if signs differ jump
+
+                xchg    ecx, edx        \ save UP
+                pop     eax
+                idiv    ebx
+                test    edx, edx        \ set zero flag
+                je      short @@2
+                add     edx, ebx        \ add divisor to remainder
+                sub     eax, # 1             \ decrement quotient
+                jmp     short @@2
+
+@@1:            xchg    ecx, edx        \ preserve DX in CX, DX=high num
+                pop     eax             \ EAX=low numerator
+                idiv    ebx             \ perform the division
+
+@@2:            push    edx             \ push remainder
+                mov     ebx, eax        \ quotient to EBX
+                mov     edx, ecx        \ restore UP
+                next    c;
+
+CODE /MOD       ( n1 n2 -- rem quot ) \ integer signed single divide with remainder & quotient
+                pop     ecx
+                mov     eax, ecx
+                xor     eax, ebx
+                jns     short @@1
+
+                mov     eax, ecx        \ low order part to eax
+                mov     ecx, edx        \ save UP
+                cdq
+                idiv    ebx
+                test    edx, edx        \ set zero flag
+                je      short @@2
+
+                add     edx, ebx        \ add divisor to remainder
+                sub     eax, # 1             \ decrement quotient
+                jmp     short @@2
+
+@@1:            mov     eax, ecx        \ low order part to eax
+                mov     ecx, edx
+                cdq
+                idiv    ebx
+@@2:            push    edx
+                mov     ebx, eax
+                mov     edx, ecx        \ restore UP
+                next    c;
+
+: /             ( n1 n2 -- quot ) \ integer single divide : quotient
+                /MOD NIP ;
+
+: MOD           ( n1 n2 -- rem ) \ integer single divide : remainder
+                /MOD DROP ;
+
+CODE */MOD      ( n1 n2 n3 -- remainder quotient ) \ integer single multiply and divide:
+                \ give remainder and quotient of [n1*n2]/n3. Intermediate result n1*n2
+                \ is a double, so there is no overflow.
+                pop     ecx
+                pop     eax
+                push    edx             \ save UP
+                imul    ecx
+                mov     ecx, edx
+                xor     ecx, ebx
+                jns     short @@1
+
+                idiv    ebx
+                test    edx, edx        \ set zero flag
+                je      short @@2
+                add     edx, ebx        \ add divisor to remainder
+                sub     eax, # 1             \ decrement quotient
+                jmp     short @@2
+
+@@1:            idiv    ebx
+@@2:            mov     ebx, eax
+                pop     ecx
+                push    edx
+                mov     edx, ecx        \ restore UP
+                next    c;
+
+: */            ( n1 n2 n3 -- quotient ) \ same as */MOD but gives only quotient
+                */MOD NIP ;
+~
+;
+;   ------------------------ String counting -----------------------
+;
+COUNT:      ; ( str -- addr len ) byte counted strings      ; VERIFIED
+DD _MULT
+DD do_COUNT
+DB 5, "COUNT"
+do_COUNT:
+   MOV EBX, [ESP]
+   movzx   ebx, byte ptr  [ebx-1]
+   push    ebx
+   NEXTC
+ ;
+WCOUNT:    ;  ( str -- addr len )    word (2 bytes) counted strings
+DD COUNT
+DD do_WCOUNT
+DB 6, "WCOUNT"
+do_WCOUNT:
+    POP EBX
+    add     ebx, 2
+    push    ebx
+    movzx   ebx, word ptr [ebx-2]
+	push ebx
+    NEXTC
+ ;
+LCOUNT:    ;  ( str -- addr len )    long (4 bytes) counted strings
+DD WCOUNT
+DD do_LCOUNT
+DB 6, "LCOUNT"
+do_LCOUNT:
+    POP EBX
+    add  ebx, 4
+    push ebx
+    mov  ebx,  [ebx-4]
+	push ebx
+    NEXTC
+ ;
+ZCOUNT:     ; ( str -- addr len ) null terminated string, whose 1st char is at addr   ; VERIFIED
+DD LCOUNT
+DD do_ZCOUNT
+DB 6, "ZCOUNT"
+do_ZCOUNT:
+        MOV     EBX, [ESP]
+        PUSH    EDI
+        mov     ecx, -1                 ;  scan way on up there... it had better stop!
+        xor     eax, eax                ;  look for null
+        mov     edi, ebx                ;  edi = absolute address of string
+        repnz   scasb
+        add     ecx, 2
+        neg     ecx
+        POP     EDI
+	    push    ecx
+    NEXTC
+;
+_STRINGADJ:    ; ( c-addr1 u1 n -- c-addr2 u2 )    ; VERIFIED
+; /STRING is used to remove or add characters relative to the left end of the
+; ** character string. Positive values of n will exclude characters from the string
+; ** while negative values of n will include characters to the left of the string.
+DD ZCOUNT
+DD do_STRINGADJ
+DB 7, '/STRING'
+do_STRINGADJ:
+                POP     EBX
+                pop     eax
+                test    ebx, ebx       ; Added two lines to allow a negative argument
+                jle     short @@1SDJ   ; to be passed to /STRING, so the string will
+                cmp     ebx, eax       ; be expanded.
+                jbe     short @@1SDJ   
+                mov     ebx, eax
+@@1SDJ:         add     0 [esp], ebx
+                sub     eax, ebx
+                mov     ebx, eax
+                PUSH    EBX
+NEXTC
+;
+ADDNULL:     ; ( c-addr -- )  Append a NULL to the counted string.    ; VERIFIED
+DD _STRINGADJ
+DD do_ADDNULL
+DB 5, '+NULL'
+do_ADDNULL:
+   POP     EBX
+   mov     CL, BYTE PTR [ebx-1]         ; length
+   AND     ECX, 00FFH
+   ADD     EBX, ECX
+   mov     BYTE PTR [EBX], 0                 ; zero the char
+   NEXTC
+;
+;    -------------------- Logical Operators ------------------------------------
+
+_AND:     ; ( n1 n2 -- n3 )  ;    perform bitwise AND of n1,n2, return result n3     ; VERIFIED
+DD ADDNULL
+DD do_AND
+DB 3, "AND"
+do_AND:
+    POP EBX
+    pop ecx
+    and ebx, ecx
+    push ebx
+    NEXTC
+ ;
+_OR:      ; ( n1 n2 -- n3 )  ;    perform bitwise OR of n1,n2, return result n3    ; VERIFIED
+DD _AND
+DD do_OR
+DB 2, "OR"
+do_OR:
+    POP EBX
+    pop ecx
+    or ebx, ecx
+    push ebx
+    NEXTC
+ ;
+_XOR:     ; ( n1 n2 -- n3 )  ;    perform bitwise XOR of n1,n2, return result n3    ; VERIFIED
+DD _OR
+DD do_XOR
+DB 3, "XOR"
+do_XOR:
+    POP EBX
+    pop ecx
+    xor ebx, ecx
+    push ebx
+    NEXTC
+ ;
+_INVERT:  ; ( n1 -- n2 )     ;    perform a bitwise -1 XOR on n1, return result n2    ; VERIFIED
+DD _XOR
+DD do_INVERT
+DB 6, "INVERT"
+do_INVERT:
+    POP EBX
+    not ebx
+    push ebx
+    NEXTC
+ ;
+_LSHIFT:  ; ( u1 n -- u2 )  ;    shift u1 left by n bits ; (multiply)    ; VERIFIED
+DD _INVERT
+DD do_LSHIFT
+DB 6, "LSHIFT"
+do_LSHIFT:
+    POP EBX
+    mov ecx, ebx
+    pop ebx
+    shl ebx, cl
+    push ebx
+    NEXTC
+ ;
+_RSHIFT:  ; ( u1 n -- u2 )  ;    shift u1 right by n bits ; (divide)    ; VERIFIED
+DD _LSHIFT
+DD do_RSHIFT
+DB 6, "RSHIFT"
+do_RSHIFT:
+    POP EBX
+    mov ecx, ebx
+    pop ebx
+    shr ebx, cl
+    push ebx
+    NEXTC
+ ;
+_INCR:  ; ( addr -- )  ;    increment the contents of addr 
+DD _RSHIFT
+DD do_INCR
+DB 4, "INCR"
+do_INCR:
+    POP EBX
+    add dword ptr 0 [ebx],  1
+    NEXTC
+ ;
+_DECR:  ; ( addr -- )  ;    decrement the contents of addr 
+DD _INCR
+DD do_DECR
+DB 4, "DECR"
+do_DECR:
+    POP EBX
+    sub dword ptr 0 [ebx],  1
+    NEXTC
+ ;
+CINCR:  ; ( addr -- )  ;    increment the BYTE contents of addr
+DD _DECR
+DD do_CINCR
+DB 5, "CINCR"
+do_CINCR:
+    POP EBX
+    mov eax, [ebx]
+    add eax,  1
+    mov [ebx], eax
+    NEXTC
+ ;
+CDECR:  ; ( addr -- )  ;    decrement the BYTE contents of addr
+DD CINCR
+DD do_CDECR
+DB 5, "CDECR"
+do_CDECR:
+    POP EBX
+    mov eax, [ebx]
+    sub eax,  1
+    mov [ebx], eax
+    NEXTC
+ ;
+_ON:      ; ( addr -- )  ;    set the contents of addr to ON ; (-1)
+DD CDECR
+DD do_ON
+DB 2, "ON"
+do_ON:
+    POP EBX
+    mov dword ptr 0 [ebx], -1
+    NEXTC
+ ;
+_OFF:     ; ( addr -- )  ;    set the contents of addr of OFF ; (0)
+DD _ON
+DD do_OFF
+DB 3, "OFF"
+do_OFF:
+    POP EBX
+    mov dword ptr 0 [ebx],  0
+    NEXTC
+;
+;    -------------------- Other Operators ------------------------------------
+;
+DOCOL:   ; ( -- )        runtime for colon definitions
+DD _OFF
+DD do_DOCOL
+DB 7, "DOCOLON"
+do_DOCOL:  
+    POP EAX
+    SUB EBP, 4
+    MOV [EBP], EDI
+    mov edi, eax
+    mov eax, [edi]
+    add edi, 4
+    JMP EAX 
+;
+DODOES:  ;( -- a1 )   ;  runtime for DOES>
+DD DOCOL 
+DD do_DODOES
+DB 6, "DODOES"
+do_DODOES: 
+    mov     [ebp-4], esi   ;  rpush esi
+    mov     esi, ecx        ;  new esi
+    lea     ebx, 4 [eax]
+    mov     eax, [esi-4]
+    sub     ebp,  4
+    JMP EAX
+;
+DOVAR:   ;( -- a1 )   ;  runtime for CREATE and VARIABLE   VERIFIED 231201
+DD DODOES  
+DD do_DOVAR
+DB 5, "DOVAR"
+do_DOVAR: 
+    MOV EBX, NFA
+    MOV EAX, ECX
+    ADD EAX, EBX
+    ADD EAX, 5
+    push EAX
+    NEXTC
+; 
+DOUSER:  ;( -- a1 )   ;  runtime for USER variables
+DD DOVAR  
+DD do_DOUSER
+DB 6, "DOUSER"
+do_DOUSER: 
+    mov     ebx, 4 [eax] ;  get offset
+    add     ebx, edx     ;  add absolute user base
+    PUSH EBX
+    NEXTC
+; 
+DOCON:   ;( -- n1 )   ;  runtime for constants   VERIFIED 231201
+DD DOUSER  
+DD do_DOCON
+DB 5, "DOCON"
+do_DOCON: 
+    MOV EBX, NFA
+    MOV EAX, ECX
+    ADD EAX, EBX
+    ADD EAX, 1
+    PUSH [EAX]
+    NEXTC
+; 
+DODEFER:  ;( -- )     ;  runtime for DEFER
+DD DOCON 
+DD do_DODEFER
+DB 7, "DODEFER"
+do_DODEFER: 
+    mov     eax, 4 [eax]
+    JMP EAX
+
+DOVALUE:  ;( -- n1 )  ;  runtime for VALUE fetch    VERIFIED 231201
+DD DODEFER  
+DD do_DOVALUE
+DB 7, "DOVALUE"
+do_DOVALUE: 
+    MOV EAX, 0
+    MOV EBX, NFA
+    MOV AL, BYTE PTR [EBX]
+    ADD EAX, EBX
+    inc eax                 ;   ADD EAX, 9
+    PUSH [EAX]
+    NEXTC
+ ; 
+DOVALUESTORE:  ;( n1 -- )   ;  runtime for VALUE store    VERIFIED 231201
+DD DOVALUE
+DD do_VALUESTORE
+DB 8, "DOVALUE!"
+do_VALUESTORE: 
+    POP EAX         ; DISCARD CFA POPINTER
+    MOV EAX, 0
+    MOV EBX, NFA
+    MOV AL, BYTE PTR [EBX]
+    ADD EAX, EBX
+    inc eax         ; ADD EAX, 9
+    POP EBX         ; RETRIEVE VALUE N1
+    mov [eax], ebx  ; SAVE VALUE
+    NEXTC
+ ; 
+DOVALPLUSTORE:  ;( n1 -- )   ;  runtime for VALUE increment   VERIFIED 231201
+DD DOVALUESTORE  
+DD do_VALPLUSTORE
+DB 9, "DOVALUE+!"
+do_VALPLUSTORE: 
+    POP EAX         ; DISCARD CFA POPINTER
+    MOV EAX, 0
+    MOV EBX, NFA
+    MOV AL, BYTE PTR [EBX]
+    ADD EAX, EBX
+    inc eax         ;ADD EAX, 9
+    POP EBX         ; RETRIEVE VALUE N1
+    add     [eax], ebx
+    NEXTC
+ ; 
+DO2VALUE:  ;( d1 -- )   ;  runtime for 2VALUE fetch
+DD DOVALUESTORE 
+DD do_DO2VALUE
+DB 8, "DO2VALUE"
+do_DO2VALUE: 
+    POP EBX 
+    push    ebx
+    mov     ecx, 4 [eax]
+    push    4 [ecx]
+    mov     ebx, 0 [ecx]
+    NEXTC
+ ; 
+DOOFF:      ;( n -- )    ;  run-time for OFFSET and FIELD+
+DD DO2VALUE  
+DD do_DOOFF
+DB 5, "DOOFF"
+do_DOOFF: 
+    POP EBX 
+    add ebx, 4 [eax]
+    NEXTC
+ ; 
+SOURCE_:        ; ( -- addr len )     (SOURCE)                 2@ ;
+DD DOOFF
+DD do_SOURCE_
+DB 6, 'SOURCE'
+do_SOURCE_:
+    mov ebx, _SOURCE     ; -----------------Needs work 
+    push [ebx]
+    add ebx, 4
+    push [ebx]
+    NEXTC
+;
+_HEADER_:   ;( addr len -- )   standard voc header word
+DD SOURCE_
+DD do__HEADER_
+DB 8, '(HEADER)'
+do__HEADER_:
+   mov     ecx, CURRENT       ; get current vocab
+;  mov     eax, VHEAD VOC#0 - [ecx] ; fetch header word to execute
+   JMP     eax
+;
+;   -------------------- Block Memory Operators -------------------------------
+;
+ _CMOVE:          ; (  from to count -- )     move "count" bytes from address "from" to   ; VERIFIED
+ DD _HEADER_      ;  address "to" - start with the first byte of "from"
+ DD do_CMOVE
+ DB 5, 'CMOVE'
+ do_CMOVE:
+                MOV     _EDI , EDI
+                POP     EBX
+                mov     ecx, ebx
+                mov     eax, esi
+                pop     edi
+                pop     esi
+                rep     movsb
+                mov     esi, eax
+;               xor     edi, edi
+                MOV     EDI, _EDI
+                NEXTC
+;
+_FILL:      ;   ( addr len char -- )  fill addr with char for len bytes  
+DD  _CMOVE
+DD do_FILL
+DB 4, 'FILL'
+do_FILL:
+                POP     EBX             ;  CHAR
+                mov     bh, BL          ;  bh & bl = char
+                shl     ebx,  16
+                mov     eax, ebx
+                shr     eax,  16
+                or      eax, ebx
+FILLJ:          mov     ebx, edi        ;  ebx = base POINTER
+                pop     ecx             ;  ecx = len
+                pop     edi             ;  edi = addr
+                push    ecx             ;  optimize
+                shr     ecx,  2
+                rep     stosD
+                pop     ecx
+                and     ecx,  3
+                rep     stosB
+                mov     edi, ebx        ;  restore
+                NEXTC                   ;  FILL
+;
+_ERASE:     ;( addr u -- )  ; VERIFIED
+;  *G If u is greater than zero, clear all bits in each of u consecutive address
+;  ** units of memory beginning at addr .
+DD _FILL
+DD do_ERASE
+DB 5, 'ERASE'
+do_ERASE:
+                xor     eax, eax
+                jmp     FILLJ
+;
+BLANK:     ;( c-addr u -- )           ANSI         String
+;  *G If u is greater than zero, store the character value for space in u consecutive
+;  ** character positions beginning at c-addr.
+DD _ERASE
+DD do_BLANK
+DB 5, 'BLANK'
+do_BLANK:
+                mov     eax, 20202020h ;  all blanks
+                jmp     FILLJ
+;
+; -------------------- Parse Input Stream --------------------
+;
+TOBODY:       ;( cfa -- pfa ) \ convert code field address to parameter field address
+DD BLANK
+DD do_TOBODY
+DB 5, ">BODY"
+do_TOBODY:
+    POP EBX
+    add ebx,  4
+    PUSH EBX
+    NEXTC
+ ;
+BODYOFF:      ;( pfa -- cfa ) \ convert parameter field address to code field address
+DD TOBODY
+DD do_BODYOFF
+DB 5, "BODY>"
+do_BODYOFF:
+    POP EBX
+    sub ebx,  4
+    PUSH EBX
+    NEXTC
+;
+_WORD:       ; ( SADDR char -- Caddr ) CADDR = COUNTED STRING       ; VERIFIED
+DD BODYOFF
+DD do_WORD
+DB 4, "WORD"
+do_WORD: ; ( SADDR BL -- SADDR )
+; parse the input stream for a string delimited by char. Skip all leading char. Give a
+; counted string (the string is ended with a blank, not included in count).
+; If char is a blank treat all control characters as delimiter.
+; Use only inside colon definition.
+    POP     EBX ; delimiter CHAR
+    CMP     S_LEN, 1
+    JG      @@W1
+    NEXTC
+@@W1:
+    POP     EAX ; ADDRESS OF STRING
+    PUSH    EDI
+    push    esi     	
+    MOV     EDI, EAX            ; edi = input pointer
+    MOV     EAX, 0
+    mov     al, bl              ; al = delimiter
+    add     edi, _IN    		; add _IN
+    mov     ecx, S_LEN          ; ecx = input length
+    sub     ecx, _IN    		; subtract _IN
+    ja      short @@9A
+    xor     ecx, ecx   			; at end of input
+    MOV     _IN, 0
+    jmp     @@8A
+@@9A:
+    cmp     al,  32
+    jne     short @@5A
+                                ; Delimiter is a blank, treat all chars <= 32 as the delimiter
+@@1B:
+    cmp     [edi], al           ; leading delimiter?
+    ja      short @@2B
+    NEXTC
+    sub     ecx,  1
+    jnz     short @@1B
+    mov     esi, edi    		; esi = start of word
+    mov     ecx, edi    		; ecx = end of word
+    jmp     short @@7A
+@@2B:
+    mov     esi, edi    		; esi = start of word
+@@3B:
+    cmp     [edi], al     		; end of word?
+    jbe     short @@4B
+    add     edi,  1
+    sub     ecx,  1
+    jnz     short @@3B
+    mov     ecx, edi    		; ecx = end of word
+    jmp     short @@7A
+@@4B:
+    mov     ecx, edi    		; ecx = end of word DELIMITER FOUND
+    add     edi,  1  			; skip over ending delimiter
+    jmp     short @@7A
+						        ; delimiter is not a blank
+@@5A:
+    repz    scasb
+    jne     short @@6A
+    mov     esi, edi    		; end of input
+    mov     ecx, edi
+    jmp     short @@7A
+@@6A:
+    sub     edi,  1    			; backup
+    add     ecx,  1
+    mov     esi, edi    		; esi = start of word
+    repnz   scasb
+    mov     ecx, edi    		; ecx = end of word
+    jne     short @@7A
+    sub     ecx,  1   	 		; account for ending delimiter
+                                ; Update _IN pointer and get word length
+@@7A:
+    sub     edi, S_ADR              ; offset from start
+    mov     _IN , edi   		    ; update _IN
+    sub     ecx, esi    		    ; length of word
+    cmp     ecx,  MAXCOUNTED        ; max at MAXCOUNTED
+    jbe     short @@8A
+    mov     ecx,  MAXCOUNTED        ; clip to MAXCOUNTED
+						            ; Move string to pocket
+@@8A:
+    mov     edi, POCKET         ; edi = pocket
+    PUSH    EDI
+    mov     [edi], cl           ; store count byte
+    add     edi,  1
+    rep     movsb       	    ; move rest of word
+    mov     eax,  32
+    stosb               	    ; append a BLANK to pocket
+    POP     EAX
+    pop     esi
+    POP     EDI
+    INC     EAX
+    PUSH    EAX
+    NEXTC                       ; END OF WORD: 
+;
+PARSENAME:  ; ( "<spaces>name" -- c-addr u ) ; parse the input stream
+DD _WORD
+DD do_PARSENAME
+DB 9, "PARSENAME"
+do_PARSENAME:
+    POP EBX
+    ; for a string delimited by spaces. Skip all leading spaces.
+    ; Give the string as address and count.
+    push    ebx
+    mov     eax, S_ADR           ; edi = input pointer
+    add     eax, _IN   		     ; add _IN
+    push    eax         		 ; address of output eax = input char
+    mov     ecx, S_LEN           ; ecx = input length
+    sub     ecx, _IN    		 ; subtract _IN
+    ja      short @@1C
+    xor     ecx, ecx   			 ; at end of input
+    jmp     short @@8C
+
+@@1C:
+    push    eax
+    mov     eax, [eax]
+    cmp     eax,  32        ; leading delimiter?
+    pop     eax
+    ja      @@2C
+    add     eax,  1    		; go to next character
+    sub     ecx,  1
+    jnz     @@1C
+
+    mov     ebx, eax    	; ebx = start of word
+    mov     ecx, ebx   		; ecx = end of word
+    jmp     short @@7C
+
+@@2C:
+    mov     ebx, eax    	; ebx = start of word
+@@3C:
+    push    eax
+    mov     eax, [eax]
+    cmp     eax,  32        ; end of word?
+    pop     eax
+    jbe     @@4C
+    add     eax,  1
+    sub     ecx,  1
+    jnz     short @@3C
+    mov     ecx, eax        ; ecx = end of word
+    jmp     short @@7C
+
+@@4C:
+    mov     ecx, eax    	; ecx = end of word
+    add     eax,  1    		; skip over ending delimiter
+            ; update _IN pointer and get word length
+@@7C:
+    sub     eax, S_ADR       ; offset from start
+    mov     _IN , eax  		 ; update _IN
+    sub     ecx, ebx    	 ; length of word
+    mov     0 [esp], ebx     ; save on stack
+@@8C:
+    mov     ebx, ecx    	 ; and length
+    NEXTC
+;
+PARSE:      ; ( char "ccc<char>" -- c-addr u ) ; parse the input stream
+DD PARSENAME
+DD do_PARSE
+DB 5, "PARSE"
+do_PARSE:
+    POP EBX
+    ; for a string delimited by char. Skip ONLY ONE leading char.
+    ; Give the string as address and count.
+    mov     eax, S_ADR              	; edi = input pointer
+    add     eax, _IN    			; add _IN
+    push    eax         			; address of output
+    push    edx
+    mov     dl, bl      				; char to scan for eax = input char
+    mov     ecx, S_LEN              	; ecx = input length
+    sub     ecx, _IN    			; subtract _IN
+    ja      short @@1D
+    xor     ecx, ecx    ; at end of input
+    jmp     short @@8D
+
+@@1D:
+    mov     ebx, eax    				; ebx = start of word
+@@3D:
+    cmp     [eax], dl        		; end of word?
+    je      short @@4D
+    add     eax,  1
+    sub     ecx,  1
+    jnz     short @@3D
+    mov     ecx, eax    			; ecx = end of word
+    jmp     short @@7D
+
+@@4D:
+    mov     ecx, eax    			; ecx = end of word
+    add     eax,  1    			; skip over ending delimiter
+            ; update _IN pointer and get word length
+@@7D:
+    sub     eax, S_ADR              		; offset from start
+    mov     _IN , eax   			; update _IN
+    sub     ecx, ebx    			; length of word
+    mov     4 [esp], ebx            	; save on stack
+@@8D:
+    mov     ebx, ecx    				; and length
+    pop     edx
+    PUSH EBX
+    NEXTC       ; END OF PARSE
+ ;
+ PARSESTR:  ; ( Addr Len -- Addr Len)       VERIFIED 231205
+DD PARSE
+DD do_PARSESTR
+DB 9, "PARSE-STR"
+do_PARSESTR:
+POP EBX             ;   EBX register = LENGTH OF STRING
+POP EAX             ;   Load String Address
+PUSH EDX            ;   Save register set
+PUSH EAX            ;   Save String address
+ADD EAX , EBX       ;    Add length to addr to find End of string
+MOV EDX , EAX       ;   Save End of string
+POP EAX             ;   restore string addr
+MOV ECX,  0000      ;   Load Counter
+@@1E:
+push eax
+mov eax, [eax]
+CMP eax,  32        ;   advance over leading spaces
+pop eax
+JNE SHORT @@2E
+INC EAX
+CMP EAX, EDX
+JE SHORT @@3E       ;   end of string encountered
+JMP SHORT @@1E
+@@2E:
+PUSH EAX            ;   save starting address
+@@4E:
+INC ECX
+push eax
+mov AL, BYTE PTR [eax]
+CMP AL,  32        ;   locate a space
+pop eax
+JE SHORT @@3E       ; trailing space found
+CMP EAX, EDX
+JE SHORT @@3E       ;   past end of string
+INC EAX
+JMP SHORT @@4E
+@@3E:
+DEC ECX
+MOV EBX, ECX        ;   move counter to ebx
+POP EAX
+POP EDX
+PUSH EAX
+push ebx
+NEXTC               ; END OF PARSESTR
+;
+_NOOP:      ; VERIFIED
+DD PARSESTR
+DD do_NOOP
+DB 4, 'NOOP'
+do_NOOP:
+NEXTC
+;
+_HERE:      ; VERIFIED
+DD _NOOP
+DD do_HERE
+DB 4, 'HERE'
+do_HERE:
+mov ebx, [DPR]
+push ebx
+NEXTC
+;
+_UPPERCASE: ; ( SADDR LEN -- SADDR)     ; VERIFIED
+DD _HERE
+DD do_UPPERCASE
+DB 9, 'UPPERCASE'
+do_UPPERCASE:
+POP ECX  ; STRING LENGTH
+MOV  EBX ,[ESP]
+AND ECX, 0FFH
+MOV EAX, 0
+MOV TV$, EBX 
+Invoke szUpper, TV$
+NEXTC       ; UPPERCASE
+;
+_LOWERCASE: ; ( SADDR LEN -- SADDR)     ; VERIFIED
+DD _UPPERCASE
+DD do_LOWERCASE
+DB 9, 'LOWERCASE'
+do_LOWERCASE:
+POP ECX  ; STRING LENGTH
+MOV  EBX ,[ESP]
+AND ECX, 0FFH
+MOV EAX, 0
+MOV TV$, EBX 
+Invoke szLower, TV$
+NEXTC       ; LOWERCASE
+;
+FIND: ; ( SADDR LEN -- cfa   ) Search dictionary for a word         VERIFIED
+DD _LOWERCASE
+DD do_FIND
+DB 4, 'FIND'
+do_FIND:
+MOV FCOUNTER, 0
+MOV CFA, 0
+MOV LFA, 0
+MOV NFA, 0
+MOV FFLAG, 0
+MOV EAX, 0
+POP ECX     ; LENGTH
+AND CX, 0FH
+CMP CX, 0
+JG @@01
+MOV FFLAG, 0
+POP EAX     ; REMOVE ADDRESS FROM STACK
+PUSH CFA    
+NEXTC       ; ABORT
+@@01:
+POP EAX     ; POCKET ADDRESS
+PUSH EDI    ; INTERPRETER POINTER
+PUSH [LATEST] 
+@@6F:
+INC FCOUNTER
+POP EBX
+CMP CL,  [EBX+8]
+JNZ @@1F
+; WORD LENGHTS ARE EQUAL CMP WORDS
+MOV LFA, EBX
+PUSH EBX
+ADD EBX, 8
+MOV NFA, EBX    
+POP EBX
+PUSH EBX
+MOV CL, [POC]
+AND CX, 0FH
+ADD EBX, 4
+PUSH [EBX]
+POP CFA
+ADD EBX, 5
+MOV ESI, EAX
+MOV EDI, EBX
+REPE CMPSB
+POP EBX
+MOV CL, [POC]
+JNZ @@1F 
+POP EDI
+MOV FFLAG, -1
+JMP @@5F
+@@1F:
+MOV EBX, [EBX] ; LINK ADDRESS
+PUSH EBX
+PUSH [EBX] ; LINK ADDRESS
+POP EBX 
+CMP EBX, 0
+JZ @@6F1
+MOV EBX, [ESP] ; RECOVER ADDRESS
+MOV NFA, 0
+MOV LFA, 0
+JMP @@6F
+@@6F1:
+POP ECX
+POP EDI
+PUSH POCKET
+POP CFA
+INC CFA
+MOV FFLAG, 0
+@@5F:
+PUSH CFA
+NEXTC ; FIND: LEAVING CFA
+;
+GTNUMBER:    ;( ud addr len -- ud addr len )    VERIFIED 231211
+DD _LOWERCASE
+DD do_GTNUMBER
+DB 8, 'GTNUMBER'
+do_GTNUMBER:
+                POP     EBX
+                test    ebx, ebx                ; check if anything to convert
+                je      short @@4H              ; zero, so skip
+                mov     [ebp-4], edi
+                mov     [ebp-8], edx            ; save UP
+                mov     esi, [esp]              ; esi = address
+                mov     edi, BASE               ; get the number base
+@@1H:           movzx   eax, byte ptr [esi]     ; get next digit
+                cmp     al,  '0'
+                jb      short @@3H              ; if below '0' branch to done
+                cmp     al,  '9'
+                jbe     short @@2H              ; go convert it
+                and     al,  0DFH               ; convert to uppercase
+                cmp     al,  'A'                ; if below 'A'
+                jb      short @@3H              ; then branch to done
+                sub     al,  7
+@@2H:           sub     al,  '0'
+                cmp     eax, edi
+                jae     short @@3H              ; out of base range
+                xchg    eax, 4 [esp]            ; high word * base
+                mul     edi
+                xchg    eax, 8 [esp]            ; low word * base
+                mul     edi
+                add     eax, 4 [esp]            ; add
+                adc     edx, 8 [esp]
+                mov     8 [esp], eax            ; store result
+                mov     4 [esp], edx
+                add     esi,  1
+                sub     ebx,  1
+                jnz     short @@1H
+@@3H:           mov     [esp], esi              ; address of unconvertable digit
+                mov     edi, [ebp-4]
+                mov     edx, [ebp-8]            ; save UP
+@@4H:            
+NEXTC
+;
+NUMINIT:      ; ( -- )                  initialise number values
+DD GTNUMBER
+DD do_NUMINIT
+DB 7, 'NUMINIT'
+do_NUMINIT:
+MOV DOUBLEQ, -1                ; false to double?
+MOV DPLOCATION, -1             ; -1 to dp-location
+MOV VENUMQ, 0                  ; false to -ve-num?
+NEXTC
+;
+NEWNUMB: ; ( ADDR -- N F )  ONLY WORKS FOR INTEGERS (+/-)       ; VERIFIED
+DD NUMINIT
+DD do_NEWNUMB
+DB 7,'NEWNUMB'
+do_NEWNUMB:
+POP TV$
+MOV EAX,0
+MOV ECX, TV$
+SUB ECX, 1
+MOV AL, BYTE PTR [ECX]
+ADD EAX, TV$
+MOV BYTE PTR [EAX], 0
+invoke atol, TV$ ; CONVERT ASCII STRING TO NUMBER (EAX)
+PUSH EAX
+PUSH -1
+NEXTC
+;
+NEWHEADER:
+DD NEWNUMB
+DD do_NEWHEADER
+DB 7, 'NEWHEADER'
+do_NEWHEADER:
+POP ECX     ; LENGTH
+POP EBX     ; ADDR TIB
+PUSH EDI
+PUSH ECX
+AND ECX, 00FFH
+INC ECX
+MOV EDX, LATEST     ; PREVIOUS LFA
+MOV EAX, DPR
+MOV LFA, EAX        ; SAVE LFA
+MOV [EAX],  EDX     ; LOAD LFA
+MOV LATEST, EAX     ; UPDATE LATEST WITH NEW LFA
+ADD EAX, 8          ; MOVE TO NFA
+MOV NFA, EAX        ; SAVE NFA 
+MOV EDI, EAX
+SUB EBX, 1
+MOV ESI, EBX
+REP MOVSB           ; LOAD NFA WITH LENGTH BYTE AND STRING
+MOV EAX, DPR          
+POP ECX
+INC ECX
+ADD ECX, 8         
+ADD EAX, ECX        ; CFA
+MOV CFA, EAX
+MOV EAX, LFA
+ADD EAX, 4
+PUSH CFA
+POP [EAX]           ; SAVE CFA
+PUSH CFA
+POP EAX
+;ADD EAX, 4
+PUSH EAX
+POP DPR
+POP EDI
+NEXTC       ; EXIT NEWHEADER
+;
+KBREAD:   ; READ INPUT FROM KEYBOARD        ; VERIFIED
+DD NEWHEADER
+DD do_KBREAD
+DB 6, 'KBREAD'
+do_KBREAD:
+invoke StdOut,ADDR MsgQ
+invoke StdIn, ADDR TIB, LENGTHOF TIB
+LEA EBX, TIB    ; ADD A SPACE TO END OF INPUT LINE
+ADD EBX, EAX
+PUSH 20H
+POP [EBX]
+ADD EAX, 1
+MOV S_LEN, EAX
+PUSH EAX
+NEXTC
+;
+CLS: ; CLEAR SCREEN     ; VERIFIED
+DD KBREAD
+DD do_CLS
+DB 3, 'CLS'
+do_CLS:
+    invoke ClearScreen
+NEXTC
+;
+CR: ; EMIT CRLF ; VERIFIED
+DD CLS
+DD do_CR
+DB 2, 'CR'
+do_CR:
+invoke StdOut,ADDR crlf$
+NEXTC
+;
+DABS:           ; ( d1 -- d2 )    \ return the absolute value of d1 as d2
+DD CR
+DD do_DABS
+DB 4, 'DABS'
+do_DABS:
+POP     EBX
+test    ebx, ebx
+jns     short @@1K
+pop     eax
+neg     ebx
+neg     eax
+sbb     ebx, 0
+push    eax
+@@1K:   NEXTC
+;
+HOLD:       ; ( char -- ) \ insert char in number output picture - see <#
+DD DABS
+DD do_HOLD
+DB 4, 'HOLD'
+do_HOLD:
+mov     eax, 4 [EDX]   ; UP EQU EDX  ( [EDX] + 4 )  CELLS = + 4  MOV EAX, [EDX] + 4
+sub     eax, 1
+mov     [eax], bl
+mov     4 [EDX], eax   ; DUP USER HLD CELL+ ( numeric output pointer )
+pop     ebx
+PUSH    EBX
+NEXTC
+;
+SPACES: ; ( N -- )
+DD HOLD
+DD do_SPACES
+DB 6, 'SPACES'
+do_SPACES:
+POP ECX ; NUMBER OF SPACES
+@@1L:
+ invoke StdOut, ADDR SPACE$
+ DEC BL
+ CMP BL, 0
+ JNZ @@1L
+ NEXTC
+;
+POUND:              ; CODE #  ( d1 -- d2 ) \ convert a digit in pictured number output - see <#
+DD SPACES
+DD do_POUND
+DB 1, '#'
+do_POUND:
+POP EBX
+MOV EAX, EBX
+MOV ECX, BASE
+DIV CL
+cmp AH,  9
+jbe short @@1M
+add AH,  7
+@@1M:           
+add AH,  48           ; '0' 48D, 30H
+PUSH EAX
+MOV EAX, HLD
+SUB EAX, 1
+MOV HLD, EAX
+POP EDX
+MOV BYTE PTR [EAX], DH
+MOV DH, 0
+PUSH EDX
+NEXTC
+;
+itohex:                  ; (PAD N -- PAD)       VERIFIED 231206
+DD POUND
+DD do_I2HEX
+DB 5, 'I2HEX'
+do_I2HEX:
+    push   edi           ; save a call-preserved register for scratch space
+    mov    edi, [esp+8]  ; out pointer
+
+    mov    eax, [esp+4]  ; number
+
+    mov    ecx, 8        ; 8 hex digits, fixed width zero-padded
+@@loopA:
+    rol    eax, 4        ; rotate the high 4 bits to the bottom
+    mov    edx, eax
+    and    edx, 0fH      ; and isolate 4-bit integer in EDX
+    CMP    DL, 0
+    JNZ    @@loopB
+    DEC    ECX           ; SKIP LEADING 0'S
+    MOV    BYTE PTR [EDI], 32
+    INC    EDI
+    JMP    @@loopA
+@@loop:                  ; do {
+    rol    eax, 4        ; rotate the high 4 bits to the bottom
+@@loopB:
+    mov    edx, eax
+    and    edx, 0fH      ; and isolate 4-bit integer in EDX
+
+    MOV    DL, byte PTR [HEX_TABLE + edx]
+    ; movzx  edx, DL     
+    mov    [edi], DL     ; copy a character from the lookup table
+    inc    edi           ; loop forward in the output buffer
+
+    dec    ecx
+    jnz    @@loop        ; }while(--ecx)
+    MOV    BYTE PTR [EDI], 72
+    pop    edi
+    POP    EAX
+    NEXTC
+;
+__UNTIL:     ;    ( f1 -- )       \ "runtime" if f1=FALSE branch to after BEGIN
+DD itohex
+DD do__UNTIL
+DB 6, '_UNTIL'
+do__UNTIL:
+test    ebx, ebx
+pop     ebx
+je      short @@11A
+mov     eSI, 4 [edi]
+add     edi, 8
+PUSH    [ESI]
+POP     ESI
+jmp     ESI
+@@11A:            
+   mov edi, [edi]
+   PUSH [EDI]
+   POP ESI
+   SUB ESI, 4
+   ;mov eax, -4 [edi]
+   PUSH [ESI]
+   POP ESI
+   jmp ESI
+;
+_IF@:        ; INTERACTIVE IF - THEN PAIR    ; VERIFIED
+DD __UNTIL
+DD do_IF@
+DB 3, '[IF]'
+do_IF@:
+POP EBX
+CMP EBX,0
+JZ @IF
+NEXTC       ; CONTINUE PROCESS NEXT WORDS
+@IF:        ; SKIP WORDS TILL do_THEN@ FOUND
+cmp [edi], do_ELSE@
+JZ @IF1a
+CMP [EDI], do_THEN@
+JZ @IF1
+ADD EDI, 4
+JMP @IF
+@IF1a:
+ADD EDI, 4
+@IF1:
+; CONTINUE PROCESSING WORDS
+NEXTC
+;
+_ELSE@:      ; INTERACTIVE
+DD _IF@
+DD do_ELSE@
+DB 5, '[ELSE]'
+do_ELSE@:
+CMP [EDI], do_THEN@
+JZ else1
+ADD EDI, 4
+JMP do_ELSE@
+else1:
+NEXTC
+;
+_THEN@:      ; INTERACTIVE  ; VERIFIED
+DD _ELSE@
+DD do_THEN@
+DB 5, '[THEN]'
+do_THEN@:
+; NOOP
+NEXTC
+;
+HASHV:     ; ( a1 n1 #threads -- n2 )        verified 231210
+DD _THEN@
+DD do_HASHV
+DB 5, 'HASHV'
+do_HASHV:
+ POP     EBX
+ pop     eax                     ; pop count into EAX
+ mov     [EBP-4], edx            ; save UP
+ mov     [EBP-8], ebx            ; save # of threads
+ pop     ebx                     ; get string address into EBX
+ mov     ecx, eax                ; copy count into ECX
+ add     ebx, ecx
+ neg     ecx
+@@1HV:
+ rol     eax,  7                 ; rotate result some
+ xor     al, [ebx] [ecx]
+ add     ecx,  1
+ jl      @@1HV                   ; +ve, keep going
+ xor     edx, edx                ; clear high part of dividend
+ div     DWORD PTR [EBP-8]       ; perform modulus by #threads
+ mov     ebx, edx                ; move result into EBX
+ mov     edx, [EBP-4]            ; restore UP
+ lea     ebx, [ebx*4]            ; multiply by cell size
+ push    ebx
+ NEXTC
+;
+EXECUTE:   ;( cfa -- )  execute a Forth word, given its cfa  ; VERIFIED
+DD HASHV
+DD do_EXECUTE
+DB 7, 'EXECUTE'
+do_EXECUTE:
+   POP EAX
+   jmp eax
+;
+_EMSG:                  ; VERIFIED
+DD EXECUTE
+DD do_EMSG
+DB 5, 'EMSG?'
+do_EMSG:
+POP EAX
+CMP EAX, 0
+JNZ @EMSG
+invoke StdOut,ADDR Msg10
+invoke StdOut,ADDR POC+1
+invoke StdOut,ADDR Msg11
+@EMSG:
+NEXTC
+;
+COMMENT ~
+NCODE (C")      ( -- addr )                    \ for c" type strings
+                push    ebx
+                movzx   ecx, byte ptr [esi]    \ length of string
+                mov     ebx, esi               \ start of the string in TOS
+                lea     esi, 9 [ecx] [ebx]     \ optimised next, account for len & null at end
+                and     esi, # -4              \ align
+                mov     eax, -4 [esi]          \ next word
+                exec    c;                     \ go do it
+
+NCODE (Z")      ( -- addr )                    \ for z" type strings
+                push    ebx
+                lea     ebx, 1 [esi]           \ start of string in TOS
+                movzx   ecx, byte ptr [esi]    \ length of string
+                lea     esi, 8 [ecx] [ebx]     \ optimised next, account for len & null at end
+                and     esi, # -4              \ align
+                mov     eax, -4 [esi]          \ next word
+                exec    c;                     \ go do it
+~
+;
+_PDOTP:                        ; ( -- addr len )                
+DD _EMSG
+DD do_PDOTP
+DB 4, '(.")'
+do_PDOTP:
+lea     ecx, [edi]             ; start of string
+movzx   ebx, byte ptr [edi]    ; length of string in TOS
+push    ecx                    ; save addr of string
+lea     esi, 4 [ecx] [ebx]     ; optimised next, account for len & null at end
+and     esi, -4                ; align
+LEA EAX, do_TYPE               ; mov     eax, # ' TYPE          \ next word
+JMP     EAX                    ; go do it
+;
+_SP:            ; ( -- ADDR N)  EG S" TEXT TO HANDLE"         VERIFIED
+DD _PDOTP
+DD do_SP
+DB 2, 'S"'
+do_SP:
+LEA EAX, TIB    ; SAVE THE ADDRESS OF TIB FOR WORD
+PUSH EAX
+PUSH 34         ; PUSH ASCII "
+PUSH $ + 10
+JMP do_DOCOL
+DD do_WORD      ; PARSE INPUT STRING  TIB " WORD
+DD do_COUNT     ; GET LENGTH
+DD do_PUSH1, do_IN, do_FETCH  ; 1 _IN @ + _IN !     INCREMENT THE _IN OFFSET
+DD do_PLUS, do_IN, do_STORE
+DD do_SCRATCH, do_DUP, do_LIT, 80, do_ERASE
+DD do_SWAP   ; MOVE THE DATA IN THE TIB TO THE DATA AREA
+DD do_2DUP, do_2TOR, do_CMOVE, do_2RFROM
+DD do_SEMI
+;
+_Endless:    ; ENDLESS LOOP      VERIFIED
+DD _SP
+DD do_Endless
+DB 7, 'ENDLESS'
+do_Endless:
+JMP do_Endless
+;
+_QMISSING: ; ( ? )
+DD _Endless 
+DD do_?MISSING
+DB 8, '?MISSING'
+do_?MISSING:
+; POP EAX
+NEXTC
+;
+_BYE:       ; VERIFIED
+DD _QMISSING
+DD do_BYE
+DB 3, 'BYE'
+do_BYE:
+MOV BYEFLAG, 0H 
+NEXTC
+;
+_QBYE:      ; VERIFIED
+DD _BYE
+DD do_QBYE
+DB 4, '?BYE'
+do_QBYE:
+PUSH BYEFLAG 
+NEXTC
+;
+_QUIT:      ; VERIFIED
+DD _QBYE 
+DD do_QUIT
+DB  4, 'QUIT'
+do_QUIT:
+invoke StdOut,ADDR Msg6  
+JMP do_QSTACK
+NEXTC
+;
+; invoke atodw, ADDR MyDecimalString                ; CONVERT ASCII STRING TO NUMBER (EAX)
+; invoke ustr2dw, ustr2dw proc pszString:DWORD      ; Convert string to unsigned DWORD (EAX)
+;
+_dwtoa:  ; ( N, ADDR -- )  CONVERT DWORD NUMBER TO ASCII STRING     VERIFIED
+DD _QUIT
+DD do_dwtoa
+DB 5, 'DWTOA'
+do_dwtoa:
+POP TV$
+POP TV1
+invoke dwtoa, TV1, TV$
+NEXTC
+; 
+_udw2str:  ; ( N, ADDR -- )   Convert unsigned DWORD to string
+DD _dwtoa
+DD do_udw2str
+DB 7, 'UDW2STR'
+do_udw2str:
+POP TV1
+POP TV$
+invoke udw2str, TV1, TV$
+NEXTC
+;
+_stdout: ; ( ADDR LEN -- )  NOTE: SAME AS 'TYPE'    VERIFIED
+DD _udw2str
+DD do_STDOUT
+DB 6, 'STDOUT'
+do_STDOUT: 
+ADD ESP, 4      ; IGNORE LENGTH 
+POP TV$
+invoke StdOut, DWORD PTR [TV$]
+NEXTC
+;
+_TYPE: ; ( ADDR LEN -- )        VERIFIED
+DD _stdout
+DD do_TYPE
+DB 4, 'TYPE'
+do_TYPE:
+POP ECX         ; GET LENGTH BYTE
+MOV EAX, [ESP]  ; COPY TOP OF STACK TO EAX
+ADD EAX, ECX
+MOV BYTE PTR [EAX], 0   ; MUST HAVE A 0H AT END OF OUTPUT
+POP TV$         ; ADDR OF BUFFER
+invoke StdOut, DWORD PTR [TV$]
+NEXTC
+;
+_ms:            ; ( -- N ) GET SYSTEM TIME IN MILLISECONDS  VERIFIED
+DD _TYPE
+DD do_MS
+DB 3, 'MS@'
+do_MS:
+invoke GetLocalTime, ADDR _SYSTIME
+LEA EBX, _SYSTIME
+MOV ECX, 60
+ADD EBX, 8
+MOV EAX, 0
+ADD AX, WORD PTR [EBX]  ; LOAD HOURS
+ADD EBX, 2
+MUL ECX         ; CONVERT HOURS TO MINUTES
+ADD AX, WORD PTR [EBX]  ; LOAD MINUTES
+ADD EBX, 2
+MUL ECX         ; CONVERT MINUTES TO SECONDS
+ADD AX, WORD PTR [EBX]  ; LOAD SECONDS
+ADD EBX, 2
+MOV ECX, 1000
+MUL ECX         ; CONVERT SECONDS TO MILLISECONDS
+ADD AX, WORD PTR [EBX]  ; LOAD MILLISCONDS
+PUSH EAX
+NEXTC
+;
+_WDCOUNT:       ;  COUNT THE WORDS IN THE DICTIONARY       VERIFIED
+DD _ms
+DD do_WDCOUNT
+DB 7, 'WDCOUNT'
+do_WDCOUNT:
+PUSHAD
+MOV EBX, LATEST
+MOV ECX, 0
+@WDC1:
+INC ECX
+PUSH [EBX]
+MOV EAX, [ESP]
+CMP EAX, 0
+POP EBX
+JZ @WDC2
+JMP @WDC1
+@WDC2:
+MOV DCW, ECX
+POPAD
+NEXTC
+;
+_QSTACK:                ; QUERY STACK STATUS   VERIFIED 231201
+DD _WDCOUNT
+DD do_QSTACK
+DB 6, '?STACK'
+do_QSTACK:
+CMP ESP, S0
+JG @QS1
+CMP ESP, S0-1023
+JL @QS2
+MOV STACKERROR, 0           ; INBOUNDS
+NEXTC
+@QS1:
+MOV STACKERROR, -4         ; stack underflow
+NEXTC
+@QS2:
+MOV STACKERROR, -3         ; stack overflow
+NEXTC
+;
+_GCFA:  ; ( -- CFA)  PUT THE CFA ON THE STACK OF THE NEXT EXECUTABLE WORD    VERIFIED 231201
+DD _QSTACK
+DD do_GCFA
+DB 4, 'TICK'
+do_GCFA:
+MOV EAX, [EDI]
+PUSH EAX
+ADD EDI, 4
+NEXTC
+;
+ _BTOH:   ; ( BYTE - 'XX')       VERIFIED 231207
+ DD _GCFA
+ DD do_BTOH
+ DB 4, 'BTOH'
+ do_BTOH:
+ POP EAX            ;   BYTE TO CONVERT IN AX
+ PUSH EDI
+ LEA EDI, PAD
+ MOV EDX, 0
+ MOV [EDI], EDX
+ MOV ECX, 2
+ ROL EAX, 24
+@@loopB2H:
+ rol    Eax, 4        ; rotate the high 4 bits to the bottom
+ mov    edx, eax
+ and    edx, 0fH      ; and isolate 4-bit integer in EDX
+ MOV    DL, byte PTR [HEX_TABLE + edx]
+ mov    [edi], DL     ; copy a character from the lookup table
+ inc    edi           ; loop forward in the output buffer
+ dec    ecx
+ jnz    @@loopB2H        ; }while(--ecx)
+ POP EDI
+ NEXTC
+;
+_BEXT:      ; ( N, -- C,C,C,C)  EXTRACT INDIVIDUAL BYTES FROM WORD  VERIFIED 231207
+ DD _BTOH
+ DD do_BEXT
+ DB 4, 'BEXT'
+ do_BEXT:
+ POP EAX
+ MOV EBX, EAX
+ AND EAX, 0FF000000H
+ ROR EAX, 24
+ PUSH EAX
+ MOV EAX, EBX
+ AND EAX, 000FF0000H
+ ROR EAX, 16
+ PUSH EAX
+ MOV EAX, EBX
+ AND EAX, 00000FF00H
+ ROR EAX, 8
+ PUSH EAX
+ MOV EAX, EBX
+ AND EAX, 0000000FFH
+ PUSH EAX
+ NEXTC
+;
+_CMAX:      ; ( C -- C ) CHECK IF C < 32 IF TRUE RETURN 46 '.'  VERIFIED 231208 
+DD _BEXT
+DD do_CMAX
+DB 4, 'CMAX'
+do_CMAX:
+MOV EAX, [ESP]
+MOV ECX, 31
+SUB EAX, ECX
+JG CMAX0
+MOV EAX, 46
+MOV [ESP], EAX
+CMAX0:
+NEXTC
+;
+;   --------------------------- File Control Words -------------------------------------
+; R/O = 80000000H   W/O = 40000000H  R/W = C0000000H (-40000000H)
+;     -2147483648         1073741824     -1073741824
+;
+_FILEOPEN:         ; (ADDR, MODE -- IOR, F )        VERIFIED 231214
+DD _CMAX
+DD do_FILEOPEN
+DB 9, 'OPEN-FILE'
+do_FILEOPEN:
+POP EAX ; MODE
+POP HLD ; ADDR
+PUSH 0                  ;  
+PUSH 80000000H          ;  128 = NORMAL
+PUSH 3                  ;  DISPOSITION 3 = OPEN ONLY IF EXIST
+PUSH 0                  ;
+PUSH 3                  ;  SHARE MODES 1 READ 2 WRITE 3 BOTH
+PUSH EAX                ;  WRITE ONLY MODE R/O, W/O, R/W 
+PUSH HLD                ;
+call CreateFileA 
+PUSH EAX
+invoke GetLastError
+push eax
+NEXTC
+;
+_FILECLOSE:         ; ( HDL -- FLG )        VERIFIED 231212
+DD _FILEOPEN
+DD do_FILECLOSE
+DB 10, 'CLOSE-FILE'
+do_FILECLOSE:
+CALL CloseHandle
+; PUSH EAX
+invoke GetLastError
+push eax
+NEXTC
+;
+_FILECREATE:          ; (ADDR     - HLD FLG)    VERIFIED 231212
+DD _FILECLOSE
+DD do_FILECREATE
+DB 11, 'CREATE-FILE'
+do_FILECREATE:       
+POP HLD
+PUSH 0                  ;  
+PUSH 80000000H          ;  128 = NORMAL
+PUSH 2                  ;
+PUSH 0                  ;
+PUSH 3                  ;  SHARE MODES 1 READ 2 WRITE 3 BOTH
+PUSH 40000000H          ;  WRITE ONLY MODE 
+PUSH HLD                ;
+; HLD - FILENAME PTR, ACCESS, SHARE, NULL, 2 - CREATE, 128 - NORMAL, HANDLE
+call CreateFileA 
+PUSH EAX
+invoke GetLastError
+push eax
+NEXTC
+;
+_GetFileSize:   ; ( FileID -- UD F )        VERIFIED 231213
+DD _FILECREATE
+DD do_GFS
+DB 9, 'FILE-SIZE'
+do_GFS:
+LEA EAX, TV1
+POP EBX
+PUSH EAX
+PUSH EBX
+CALL GetFileSize
+PUSH EAX
+NEXTC
+;
+_FPARMSRW:  ;    ( addr len fileid -- 0 0 ptr len addr fileid ) VERIFIED 231214
+;                 parms for read/write
+DD _GetFileSize
+DD do_FPARMSRW
+DB 9, 'FPARMSRW'
+do_FPARMSRW:
+   POP     ESI                     ; RETURN VALUE
+   POP     EBX                     ; HANDLE
+   POP EAX                         ; LENGTH
+   POP ECX                         ; ADDR
+   PUSH 0
+   PUSH 0
+   PUSH EAX
+   PUSH ECX
+   PUSH    EBX
+   PUSH    ESI
+   RET ; NEXTC
+;
+_READFILE:          ; (  BUFFER, #BYTES, HNDL  -- ior )  ior = 0 = success     VERIFIED 231214
+DD _FPARMSRW
+DD do_READFILE
+DB 9, 'READ-FILE'
+do_READFILE:
+CALL do_FPARMSRW
+CALL ReadFile
+CALL GetLastError
+PUSH EAX
+NEXTC
+;
+_WRITEFILE:          ; (  BUFFER, #BYTER, HNDL  -- len ior )  ior = 0 = success
+DD _READFILE
+DD do_WRITEFILE
+DB 10, 'WRITE-FILE'
+do_WRITEFILE:
+CALL do_FPARMSRW
+CALL WriteFile
+CALL GetLastError
+PUSH EAX
+NEXTC
+;
+_fileposition:             ; ( fileid -- len-ud ior ) 0 0 rot FILE_CURRENT SETFP  VERIFIED 231216
+DD _WRITEFILE              ; RETURN FILE POSITION
+DD do_FILEPOSITION
+DB 13, 'FILE-POSITION'
+do_FILEPOSITION:
+POP EAX     ; FILE ID
+PUSH 1      ; START POINT
+PUSH 0      ; NULL
+PUSH 0      ; # BYTES TO MOVE
+PUSH EAX
+Call SetFilePointer  
+PUSH EAX
+CALL GetLastError 
+PUSH EAX
+NEXTC
+;
+_repositionfile:            ; ( len-ud fileid -- ior ) ; ior - 0 = success  FILE_BEGIN SetFP nip nip 
+DD _fileposition            ; VERIFIED 231216
+DD do_REPOSITIONFILE
+DB 15, 'REPOSITION-FILE'
+do_REPOSITIONFILE:
+POP EAX     ; FILE ID
+POP EBX     ; # BYTES TO MOVE
+PUSH 0      ; START POINT
+PUSH 0      ; NULL
+PUSH EBX     
+PUSH EAX
+Call SetFilePointer  
+PUSH EAX
+CALL GetLastError 
+PUSH EAX
+NEXTC
+;
+;  -------------------- Memory Management functions -------------------------- 
+;
+_MALLOC:
+DD _repositionfile
+DD do_MALLOC
+DB 6, 'MALLOC'
+do_MALLOC:
+
+NEXTC
+;
+_ALLOCATE:  ; ( N -- ADDR FL )      ; VERIFIED
+DD _MALLOC
+DD do_ALLOCATE
+DB 8, 'ALLOCATE'
+do_ALLOCATE:
+POP TV1     ; SIZE REQUESTED
+invoke GlobalAlloc,0,TV1            ; GMEM_MOVEABLE=0 or GMEM_ZEROINIT=2
+mov _hMemory,eax
+.if eax!=0
+invoke GlobalLock, _hMemory
+mov pMem,eax
+PUSH pMem
+CALL GetLastError
+PUSH EAX
+.else
+invoke StdOut,ADDR Msg18
+PUSH 0
+.endif
+NEXTC
+;
+_free:          ; ( pMem -- ) release global memory allocated  VERIFIED 231201
+DD _ALLOCATE 
+DD do_FREE
+DB 4, 'FREE'
+do_FREE:
+POP TV1         ; pMem
+invoke GlobalUnlock, TV1        ; pMem
+invoke GlobalFree, TV1          ; pMem
+NEXTC
+;
+;   -------------------- End of CODE Definitions ---------------------------
+;
+;   -------------------- Begining of Colon Definitions ---------------------
+;
+_DECIMAL: ; 10 BASE !       VERIFIED
+DD _free 
+DD do_DECIMAL
+DB 7, 'DECIMAL'
+do_DECIMAL:
+PUSH $ + 10
+JMP do_DOCOL 
+DD do_LIT, 10, do_BASE, do_STORE, do_SEMI
+;
+HEX:   ;    16 BASE !       VERIFIED
+DD _DECIMAL
+DD do_HEX
+DB 3, 'HEX'
+do_HEX:
+PUSH $ + 10
+JMP do_DOCOL 
+DD do_LIT, 16, do_BASE, do_STORE, do_SEMI
+;
+_BINARY:     ;    2 BASE !       VERIFIED
+DD HEX
+DD do_BINARY
+DB 6, 'BINARY'
+do_BINARY:
+PUSH $ + 10
+JMP do_DOCOL 
+DD do_LIT, 2, do_BASE, do_STORE, do_SEMI
+;
+_OCTAL: ;    8 BASE !       VERIFIED
+DD _BINARY
+DD do_OCTAL
+DB 5, 'OCTAL'
+do_OCTAL:
+PUSH $ + 10
+JMP do_DOCOL 
+DD do_LIT, 8, do_BASE, do_STORE, do_SEMI
+;
+_HEADER:
+DD _OCTAL
+DD do_HEADER
+DB 6, 'HEADER'
+do_HEADER:
+PUSH $ + 10
+JMP do_DOCOL 
+DD do_TIB
+DD do_BL
+DD do_WORD
+DD do_COUNT 
+DD do_NEWHEADER;  _HEADER_  ; Same as (HEADER)
+DD do_SEMI
+;
+_PRINT: ; ( n -- )   display as signed single       VERIFIED
+DD _HEADER
+DD do_PRINT
+DB 1, '.'
+do_PRINT:
+PUSH $ + 10
+JMP do_DOCOL 
+DD do_PAD, do_dwtoa             ; CONVERT n TO ASCII
+DD do_PAD, do_PUSH0, do_STDOUT  ; DISPLAY DATA
+DD do_SEMI
+;
+_EMIT: ; ( CHAR -- ) Display one character      VERIFIED
+dd _PRINT
+DD do_EMIT
+DB 4, 'EMIT'
+do_EMIT:
+POP EAX
+MOV PAD, BYTE PTR AL
+MOV PAD+1, 0
+LEA EAX, PAD
+PUSH EAX
+PUSH 1
+push $ + 10
+JMP do_DOCOL
+DD do_TYPE  
+DD do_SEMI
+;
+_qmark:                  ;  ( addr -- ) \ display single stored at address
+DD _EMIT
+DD do_QMARK
+DB 1, '?'
+do_QMARK:  ;  @ . ;
+PUSH $ + 10
+JMP do_DOCOL
+DD do_FETCH, do_PRINT
+DD do_SEMI
+;
+_COMMA: ; , ( n -- )  ( compile cell at HERE, increment DP)
+DD _qmark
+DD do_COMMA
+DB 1, ','
+do_COMMA:  ; HERE ! CELL DP +!  ;
+PUSH $ + 10
+JMP do_DOCOL
+DD do_HERE, do_STORE, do_CELL, do_DPR, do_PLUSSTORE 
+DD do_SEMI
+;
+_WCOMMA: ; : W, ( n -- )  ( compile word at HERE, increment DP)
+DD _COMMA
+DD do_WCOMMA
+DB 2, 'W,'
+do_WCOMMA:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_HERE  ; HERE W! 2 DP +!  ;
+DD do_WSTORE, do_LIT, 2, do_DPR, do_PLUSSTORE
+DD do_SEMI
+;
+_CCOMMA:     ; C,  ( n -- )  ( compile byte at HERE, increment DP)
+DD _WCOMMA
+DD do_CCOMMA
+DB 2, 'C,'
+do_CCOMMA:
+PUSH $ + 10
+JMP do_DOCOL                
+DD do_HERE  ; HERE C! DP INCR ;
+DD do_CSTORE, do_DPR, do_INCR
+DD do_SEMI
+;
+_CREATE:        ; ( "<spaces>name" -- )    Create a definition for name.   VERIFIED 231201
+DD _CCOMMA
+DD do_CREATE
+DB 6, 'CREATE'
+do_CREATE:
+PUSH $ + 10
+JMP do_DOCOL 
+DD do_HEADER       ;HEADER DOVAR COMPILE, ;
+DD do_VARHEAD      ;DD do_DOVAR DD do_COMPILECOMMA
+DD do_PUSH0, do_COMMA
+DD do_SEMI
+;
+_CONHEAD:       ; COMPLETE HEADER FOR CONSTANT  VERIFIED 231201
+DD _CREATE
+DD do_CONHEAD
+DB 7, 'CONHEAD' 
+do_CONHEAD:
+MOV EAX, NFA
+SUB EAX, 4 
+MOV [EAX], do_DOCON
+NEXTC
+;
+_CONSTANT:  ; ( n "name" -- )    create a constant (unchangeable) value    VERIFIED
+DD _CONHEAD
+DD do_CONSTANT
+DB 8, 'CONSTANT'
+do_CONSTANT: 
+PUSH $ + 10
+JMP do_DOCOL
+DD do_HEADER      ; HEADER DOCON COMPILE, , ;
+DD do_CONHEAD     ; LEAVE ADDRESS OF DOCON
+DD do_COMMA       ; LEAVE VALUE
+DD do_SEMI
+;
+_VARHEAD:       ; COMPLETE HEADER FOR VARIABLE  VERIFIED 231201
+DD _CONSTANT
+DD do_VARHEAD
+DB 7, 'VARHEAD' 
+do_VARHEAD:
+MOV EAX, NFA
+SUB EAX, 4
+MOV [EAX], do_DOVAR
+NEXTC
+;
+_VARIABLE:      ; ( "name" -- )      create a variable (changeable) value     VERIFIED 231201
+DD _VARHEAD
+DD do_VARIABLE
+DB 8, 'VARIABLE'
+do_VARIABLE:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_CREATE    ; CREATE 0 , ;
+DD do_PUSH0
+DD do_COMMA
+DD do_SEMI
+;
+_VALUE:         ; ( n "name" -- )  \ create a self fetching changeable value  VERIFIED 231201
+DD _VARIABLE
+DD do_VALUE
+DB 5, 'VALUE'
+do_VALUE:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TIB, do_BL, do_WORD, do_COUNT
+DD do_NEWHEADER                                                       ; 'n TO value-name' will change a value
+DD do_GCFA, do_DOVALUE, do_NFA, do_LIT, 4, do_MINUS,  do_STORE        ; DOVALUE COMPILE
+DD do_COMMA                                                           ; ( n )     ,  Parameter field
+DD do_SEMI
+;
+_LITERAL:       ;( n -- )
+DD _VALUE       ; COMPILE LIT , ; IMMEDIATE 
+DD do_LITERAL
+DB 7, 'LITERAL'
+do_LITERAL:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_COMPILE
+DD do_LIT
+DD do_COMMA
+DD do_SEMI
+;
+_TIB:           ; ( -- addr )       [ (SOURCE) CELL+ ] LITERAL  @ ;
+DD _LITERAL
+DD do_TIB
+DB 3, 'TIB'
+do_TIB:
+LEA EAX, TIB
+PUSH EAX
+NEXTC
+;
+_CHAR:  ; ( "c" -- char )
+ ;   parse char from input stream and put its ascii code on stack.
+ ;   If <c> is longer than a char, takes its first char.
+ ;   If parse area is empty return 0.
+ ;   BL WORD COUNT 0<> SWAP C@ AND ;
+DD _TIB
+DD do_CHAR
+DB 4, 'CHAR'
+do_CHAR:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TIB, do_BL, do_WORD, do_COUNT
+DD do_0NE   ; 0 <>
+DD do_SWAP, do_CFETCH, do_AND
+DD do_SEMI
+;
+PCHARP:
+DD _CHAR
+DD do_PCHARP
+DB 6, '[CHAR]'
+do_PCHARP:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_CHAR
+DD do_LITERAL
+DD do_SEMI
+;
+NUMBERQ:        ; ( addr len -- d1 f1 ) 
+DD PCHARP
+DD do_NUMBER?
+DB 7, 'NUMBER?'
+do_NUMBER?:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_NUMINIT, do_OVER, do_CFETCH, do_LIT, '-' ; CHAR 45
+DD do_EQU, do_DUP, do_venum, do_STORE
+DD do_NEGATE
+DD do_STRINGADJ
+DD do_PUSH0
+DD do_PUSH0
+DD do_2SWAP
+DD do_GTNUMBER
+DD do_NIP
+;                if false exit then leave if not all converted
+;                -ve-num? if dnegate then true 
+DD do_SEMI
+;
+_NUMBER:     ; ( str -- d ) COUNT (NUMBER?) ?MISSING   
+DD NUMBERQ
+DD do_NUMBER
+DB 6, 'NUMBER'
+do_NUMBER:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_COUNT, do_NUMBER?, do_?MISSING
+DD do_SEMI
+;        
+;   -------------------- NUMBER DEFINITIONS ---------------------------
+;
+POUNDS:         ;( d1 -- d2 ) \ consume last digits in a pictured number output - see <#
+DD _NUMBER      ; BEGIN  #  2DUP OR 0= UNTIL ;
+DD do_POUNDS
+DB 2, '#S'
+do_POUNDS:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_BEGIN@
+DD do_POUND
+DD do_2DUP
+DD do_OR
+DD do_0GT       ; do_EQU0
+DD do_UNTIL@
+DD do_SEMI
+;
+_PDDOTP:            ; (D.) ( d -- addr len )   convert as signed double to ascii string
+DD POUNDS
+DD do_PDDOTP
+DB 4, '(D.)'
+do_PDDOTP:          ; TUCK DABS  <# #S ROT SIGN #> ;
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TUCK
+DD do_DABS
+DD do_RPOUND
+DD do_POUNDS
+;DD do_ROT
+;DD do_SIGN
+DD do_LPOUND
+DD do_SEMI
+;
+_DDOT:              ;( d -- )   display as signed double
+DD _PDDOTP          ; (D.) TYPE SPACE ;
+DD do_DDOT
+DB 2, 'D.'
+do_DDOT:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_PDDOTP        ; (D.)
+DD do_TYPE
+DD do_SPACE
+DD do_EMIT
+DD do_SEMI
+;
+DDOTR:  ; ( d w -- ) \ display as signed double right justified in w wide field
+DD _DDOT
+DD do_DDOTR
+DB 3, 'D.R'
+do_DDOTR:           ; >R (D.) R> OVER - SPACES TYPE ;
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TOR
+DD do_DDOT
+DD do_FROMR
+DD do_OVER
+DD do_MINUS
+DD do_SPACES
+DD do_TYPE
+DD do_SEMI
+;
+SIGN:                  ; ( f1 -- ) \ insert a sign in pictured number output - see <#
+DD DDOTR               ; 0< IF  [CHAR] - HOLD  THEN ;
+DD do_SIGN
+DB 4, 'SIGN'
+do_SIGN:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_0LT
+DD do_IF
+DD do_PCHARP            ; [CHAR]
+DD 45                   ; '-' CHAR
+DD do_HOLD
+DD do_THEN
+DD do_SEMI
+;
+RPOUND:             ; <# ( ud -- ) \ begin a pictured number output. Full example :
+DD SIGN             ; : test dup 0< if negate -1 else 0 then >r
+DD do_RPOUND        ; s>d <# [char] $ hold # # [char] . hold # # # [char] , hold #S r> sign #>
+DB 2, '<#'          ; cr type ;
+do_RPOUND:          ; PAD HLD ! ;
+PUSH $ + 10
+JMP do_DOCOL
+DD do_PAD
+DD do_LIT, 12
+DD do_PLUS
+DD do_HLD, do_STORE
+DD do_SEMI
+;
+LPOUND:              ; #> ( d1 -- addr len ) \ ends a pictured number output - see <#
+DD RPOUND            ;2DROP  HLD @ PAD OVER - ;
+DD do_LPOUND
+DB 2, '#>'
+do_LPOUND:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_2DROP
+DD do_HLD,  do_DUP, do_FETCH
+DD do_PAD  ;do_OVER
+;DD do_SWAP, 
+DD do_MINUS    ; NO NEED TO CALC LENGTH
+DD do_SEMI
+;
+IMMEDIATE:              ; ( -- )  \ mark the last header created as an immediate word
+DD LPOUND               ; LAST @ N>BFA BFA_IMMEDIATE ( TOGGLE ) over c@ or swap c! ;
+DD do_IMMEDIATE
+DB 9, 'IMMEDIATE'
+do_IMMEDIATE:
+PUSH $ + 10
+JMP do_DOCOL
+
+DD do_SEMI
+;
+_IF:
+DD IMMEDIATE
+DD do_IF
+DB 2, 'IF'
+do_IF:
+PUSH $ + 10
+JMP do_DOCOL
+COMMENT ~
+    SWAP ['] LIT = OR 0=
+    HERE CELL - @ ['] DUP = AND
+    IF CELL NEGATE ALLOT COMPILE -?BRANCH
+    ELSE COMPILE ?BRANCH
+    THEN >MARK 2 ; IMMEDIATE
+        ~
+DD do_SEMI
+;
+_ELSE:
+DD _IF
+DD do_ELSE
+DB 4, 'ELSE'
+do_ELSE:
+PUSH $ + 10
+JMP do_DOCOL
+COMMENT ~
+       ?COMP  2 ?PAIRS  COMPILE 
+       BRANCH >MARK  SWAP >RESOLVE  2 ; IMMEDIATE
+        ~
+DD do_SEMI
+;
+_THEN:
+DD _ELSE
+DD do_THEN
+DB 4, 'THEN'
+do_THEN:
+PUSH $ + 10
+JMP do_DOCOL
+COMMENT ~
+        ?COMP  2 ?PAIRS  COMPILE 
+        _THEN >RESOLVE ; IMMEDIATE
+        ~
+DD do_SEMI
+;
+_NIF:
+DD _THEN
+DD do_NIF
+DB 2, '-IF'
+do_NIF:
+PUSH $ + 10
+JMP do_DOCOL
+
+DD do_SEMI
+;
+_LMARK:         ; <MARK ( -- addr )   HERE ;
+DD _NIF
+DD do_LMARK
+DB 5, '<MARK'
+do_LMARK:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_HERE
+DD do_SEMI
+;
+_QCOMP:         ; ?COMP  STATE @ 0=  THROW_COMPONLY   ?THROW  ;
+DD _LMARK       ; CHECK FOR COMPILATION STATE THROW ERROR IS NOT
+DD do_?COMP
+DB 5, '?COMP'
+do_?COMP:
+PUSH $ + 10
+JMP do_DOCOL
+;DD do_STATE    ; COMMENTED OUT TILL LATER DATE
+;DD do_FETCH
+;DD do_EQU0
+DD do_SEMI
+;
+QPAIRS:                ; ?PAIRS        ( n1 n2 -- )  XOR THROW_MISMATCH ?THROW ; \ Sometimes used in applications.
+DD _QCOMP
+DD do_?PAIRS
+DB 6, '?PAIRS'
+do_?PAIRS:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_XOR
+DD do_SEMI
+;
+_BEGIN:            ; BEGIN  ?COMP  COMPILE _BEGIN <MARK CELL+ 1 ; IMMEDIATE
+DD QPAIRS
+DD do_BEGIN
+DB 5, 'BEGIN'
+do_BEGIN:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_?COMP
+DD do_COMPILE
+DD do_LMARK
+DD do_PUSH1
+DD do_CELLPLUS
+DD do_SEMI
+;
+LRESOLVE:       ; : <RESOLVE      ( addr -- )   , ;
+DD _BEGIN
+DD do_LRESOLVE
+DB 8, '<RESOLVE'
+do_LRESOLVE:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_COMMA
+DD do_SEMI
+;
+_BEGIN@:        ; NOW USING THE CONTROL STACK  (CSP)
+DD LRESOLVE
+DD do_BEGIN@
+DB 6, '[BEGIN]'
+do_BEGIN@:
+MOV EAX, CSP
+SUB EAX, 4
+MOV [EAX], EDI
+MOV CSP, EAX
+NEXTC
+;
+_UNTIL@:
+DD _BEGIN@
+DD do_UNTIL@
+DB 6, '[UNTIL]'
+do_UNTIL@:
+POP EAX
+CMP EAX, 0
+JE @BU
+MOV EAX, CSP
+MOV EDI, [EAX]
+NEXTC
+@BU:
+MOV EAX, CSP
+ADD EAX, 4      ; BEGIN-UNTIL IS NOW COMPLETED DROP ADDRESS
+MOV CSP, EAX
+NEXTC
+;
+_UNTIL:         ; UNTIL ( F1 -- ) ?COMP  1 ?PAIRS  COMPILE _UNTIL  <RESOLVE ; IMMEDIATE
+DD _UNTIL@ 
+DD do_UNTIL
+DB 5, 'UNTIL'
+do_UNTIL:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_?COMP
+DD do_PUSH1
+DD do_?PAIRS
+DD do_COMPILE
+DD do__UNTIL
+DD do_LRESOLVE
+DD do_SEMI
+;
+_dotR:               ;( n w -- ) \ display as signed single right justified in w wide field
+DD _UNTIL@                   
+DD do_dotR
+DB 2, '.R'
+do_dotR:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TOR, do_StoD, do_FROMR, do_DDOTR                      ; >R  S>D  R>  D.R
+DD do_SEMI
+;
+_dotS: ;     ( -- ) \ display current data stack contents  VERIFIED 231211
+DD _dotR
+DD do_dotS
+DB 2, '.S'
+do_dotS:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_PAD, do_LIT, 80, do_ERASE
+DD do_QSTACK 
+DD do_DEPTH, do_SMAX, do_FETCH, do_MIN, do_SERROR, do_FETCH, do_EQU0
+DD do_IF@  ;  STACKERROR = 0
+DD do_DUP  ;  MIN = 0 
+DD do_IF@
+DD do_S0, do_FETCH, do_LIT, 4, do_MINUS, do_TV3, do_STORE
+DD do_LIT, 91, do_EMIT, do_DUP                      ; do_DOTP, "["
+DD do_PAD, do_dwtoa, do_PAD, do_PUSH0               ; invoke dwtoa, dwValue:DWORD, lpBuffer:DWORD 
+DD do_STDOUT                                        ; DISPLAY ASCII TEXT IN PAD
+DD do_LIT, 93, do_EMIT, do_SPACE, do_EMIT           ; do_DOTP, "]"
+DD do_BEGIN@, do_TV3, do_FETCH, do_FETCH            ; BEGIN TV3 @ @
+DD do_PAD, do_dwtoa, do_PAD, do_PUSH0               ; invoke dwtoa, dwValue:DWORD, lpBuffer:DWORD 
+DD do_STDOUT ; , do_PAD, do_LIT, 16, do_ERASE       ; CLEAR PAD
+DD do_LIT, 4, do_TV3, do_MINUSSTORE                 ; SDTOUT 4 TV3 -!   
+;DD do_BASE, do_FETCH, do_LIT, 16, do_EQU           ; BASE @ 16 =
+;DD do_IF@
+;DD do_SPACE, do_EMIT, do_LIT, 'h', do_EMIT
+;DD do_THEN@
+DD do_SPACE, do_EMIT
+DD do_1MINUS, do_DUP, do_0NE
+DD do_UNTIL@
+DD do_1PLUS
+DD do_THEN@
+DD do_THEN@
+DD do_EQU0
+DD do_IF@
+DD do_LIT, Mempty, do_PUSH0, do_STDOUT, do_RS      ; DISPLAY 'EMPTY' MESSAGE RESET STACK
+DD do_THEN@ 
+DD do_SERROR, do_FETCH, do_PUSH0, do_NEQ           ; STACKERROR <> 0
+DD do_IF@
+DD do_LIT, Msg22, do_PUSH0, do_STDOUT, do_RS       ; DISPLAY 'STACKERROR' MESSAGE
+DD do_THEN@
+DD do_SEMI
+;
+COMMENT ~
+\ -------------------- Error Handler ----------------------------------------
+
+: CATCH         ( cfa -- flag ) \ execute the word given by its cfa in a way that
+                \ will pass control to the word just after CATCH, whatever an error
+                \ occurs while cfa is executed or not - see THROW which may be
+                \ used inside the word "cfa" to handle errors if any.
+                \ if no error occured, flag is 0, else the flag is given by THROW
+                \ Beware: if an error occurs, any parameters for the word "cfa" are
+                \ still on the stack, under "flag"
+                SP@ >R
+                LP @ >R
+                OP @ >R
+                HANDLER @ >R
+                RP@ HANDLER !
+                EXECUTE
+                R> HANDLER !
+                R>DROP
+                R>DROP
+                R>DROP
+                0 ;
+
+: THROW 	( n -- )
+\ throw an error, identified by n, while executing a word
+\ whose execution is "protected" by CATCH .
+                ?DUP
+                IF      HANDLER @ RP!
+                        R> HANDLER !
+                        R> OP !
+                        R> LP !
+                        R> SWAP >R
+                        SP! DROP
+                        R>
+                THEN ;
+
+: ABORT         ( -- )
+                THROW_ABORT THROW ;
+
+: NABORT!       ( addr n -- ) \ set message, n throw
+                SWAP MSG ! THROW ;
+
+: ABORT!        ( addr -- )  \ abort, print counted string passed
+                THROW_ABORTQ NABORT! ;
+
+NCODE ?THROW    ( f n -- )
+\                SWAP IF THROW ELSE DROP THEN ;
+                pop     eax
+                test    eax, eax
+                jz      short @@9
+                mov     eax, # ' THROW         \ flag set, throw
+                exec                           \ go do it
+@@9:            pop     ebx                    \ correct tos
+                next    c;
+
+
+NCODE (("))     ( -- counted-string )
+                push    ebx
+                mov     ebx, 0 [ebp]
+                movzx   ecx, byte ptr 0 [ebx]
+                lea     eax, 5 [ebx] [ecx]  \ account for null at end
+                and     eax, # -4       \ align
+                mov     0 [ebp], eax
+                next    c;
+
+: (ABORT")      ( f -- )
+                ((")) SWAP
+                IF      ABORT!
+                THEN    DROP ;
+
+in-system
+
+: ABORT"        ( flag -<ccc>- -- ) \ abort and display message ccc if flag is true
+                COMPILE (ABORT")  ,"  ; IMMEDIATE
+                
+\ ------------------------------------------------------------
+
+: U.            ( u -- ) \ display as unsigned single
+                0 D. ;
+: U.R           ( u w -- ) \ display as unsigned single right justified in w wide field
+                0 SWAP D.R ;
+: H.            ( u -- ) \ display as signed single in hexadecimal whatever BASE is
+                BASE @ SWAP  HEX U.  BASE ! ;
+: ?             ( addr -- ) \ display single stored at address
+                @ . ;
+;
+\ -------------------- Structured Conditionals ------------------------------
+
+: ?EXEC  STATE @     THROW_INTERPONLY ?THROW  ;
+: >MARK         ( -- addr )   HERE 0 , ;           \ mark a link for later resolution by
+: >RESOLVE      ( addr -- )   HERE CELL+ SWAP ! ;
+: AHEAD  ?COMP  COMPILE  BRANCH  >MARK 2 ; IMMEDIATE
+
+\ gah Modified to optimize DUP IF into -IF
+: IF     ?COMP  HERE 2 CELLS - @ DUP ['] COMPILE =
+                SWAP ['] LIT = OR 0=
+                HERE CELL - @ ['] DUP = AND
+                IF CELL NEGATE ALLOT COMPILE -?BRANCH
+                ELSE COMPILE ?BRANCH
+                THEN >MARK 2 ; IMMEDIATE
+: -IF    ?COMP  COMPILE -?BRANCH  >MARK 2 ; IMMEDIATE
+: THEN   ?COMP  2 ?PAIRS  COMPILE _THEN >RESOLVE ; IMMEDIATE
+: ENDIF  [COMPILE] THEN ; IMMEDIATE
+: ELSE   ?COMP  2 ?PAIRS  COMPILE BRANCH >MARK  SWAP >RESOLVE  2 ; IMMEDIATE
+: AGAIN  ?COMP  1 ?PAIRS  COMPILE _AGAIN  <RESOLVE ; IMMEDIATE
+: WHILE  ?COMP  COMPILE _WHILE  >MARK 2  2SWAP ; IMMEDIATE
+: REPEAT ?COMP  1 ?PAIRS  COMPILE _REPEAT <RESOLVE  2 ?PAIRS >RESOLVE ; IMMEDIATE
+: DO     ?COMP  COMPILE (DO)   >MARK 3 ; IMMEDIATE
+: ?DO    ?COMP  COMPILE (?DO)  >MARK 3 ; IMMEDIATE
+: LOOP   ?COMP  3 ?PAIRS  COMPILE (LOOP)   DUP 2 CELLS+ <RESOLVE >RESOLVE ; IMMEDIATE
+: +LOOP  ?COMP  3 ?PAIRS  COMPILE (+LOOP)  DUP 2 CELLS+ <RESOLVE >RESOLVE ; IMMEDIATE
+NCODE BRANCH    ( -- )                    \ "runtime" for branch always
+                brnext 
+
+NCODE ?BRANCH   ( f1 -- )                 \ "runtime" for branch on f1=FALSE
+                test    ebx, ebx
+                pop     ebx
+                je      short @@1        \ yes, do branch
+                mov     eax, 4 [esi]      \ optimised next
+                add     esi, # 8
+                exec
+@@1:            brnext 
+
+NCODE -?BRANCH  ( f1 -- fl )             \ non-destructive "runtime" for branch on f1=FALSE
+                test    ebx, ebx
+                je      short @@1        \ yes, do branch
+                mov     eax, 4 [esi]      \ optimised next
+                add     esi, # 8
+                exec
+@@1:            brnext 
+
+\ -------------------- Eaker CASE statement ---------------------------------
+
+: CASE   ?COMP  COMPILE _CASE  0 ; IMMEDIATE
+: OF     ?COMP  COMPILE _OF  >MARK 4 ; IMMEDIATE
+: ENDOF  ?COMP  4 ?PAIRS  COMPILE _ENDOF  >MARK  SWAP >RESOLVE  5 ; IMMEDIATE
+
+: ENDCASE  ?COMP  COMPILE _ENDCASE
+           BEGIN  ?DUP WHILE  5 ?PAIRS  >RESOLVE  REPEAT ; IMMEDIATE
+
+; ---------------------------------------------------------------------------------------------------
+: QUERY         ; ( -- ) accept a line of input from the user to TIB
+                 TIB DUP MAXSTRING ACCEPT   (SOURCE) 2!
+                 >IN OFF
+                 0 TO SOURCE-ID 0 TO SOURCE-POSITION ;;
+ 
+ : ?MISSING        ( f -- )
+                 0= THROW_UNDEFINED AND THROW 
+ 
+ : ?STACK          ( -- )             check the data stack for stack underflow
+                 DEPTH 0< THROW_STACKUNDER ?THROW  
+ 
+ : _INTERPRET      ( -- )
+                 BEGIN   BL WORD DUP C@
+                 WHILE   SAVE-SRC FIND ?DUP
+                         IF      STATE @ =
+                                 IF      COMPILE,           COMPILE TIME
+                                 ELSE    EXECUTE ?STACK     INTERPRET
+                                 THEN
+                         ELSE    NUMBER NUMBER,
+                         THEN    ?UNSAVE-SRC
+                 REPEAT  DROP ;
+; ------------------------------------------------------------------------------
+~
+;
+ACCEPT:
+DD _dotS
+DD do_ACCEPT
+DB 6, 'ACCEPT'
+do_ACCEPT: ; ( -- NBREAD)
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TIB, do_ZCOUNT ; ( TIB -- TIB LEN)
+DD do_PUSH0  ; ( TIB -- TIB LEN 0)
+DD do_FILL   ; ( -- ) ZERO BUFFER 
+DD do_KBREAD ; ( -- n ) EAX = NBREAD n
+DD do_TIB, do_SWAP, do_UPPERCASE
+DD do_SEMI
+;
+h_FORGET:
+DD ACCEPT
+DD do_FORGET
+DB 6, 'FORGET'
+do_FORGET:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TIB, do_BL, do_WORD, do_COUNT, do_FIND ; LOCATE LFA OF WORD TO REMOVE
+DD do_LFA, do_FETCH, do_DUP, do_DUP, do_FETCH, do_LATEST, do_STORE, do_DUP
+DD do_DPR, do_FETCH, do_SWAP, do_MINUS, do_SWAP, do_DPR, do_STORE
+DD do_PUSH0, do_FILL, do_DROP            ; ERASE SPACE FROM LFA TO END OF DICT (DPR)
+DD do_SEMI
+;
+_DOTP:
+DD h_FORGET
+DD do_DOTP
+DB 2, '."'
+do_DOTP:        ; HERE [CHAR] " PARSE ", 0 C, ALIGN COUNT
+LEA EAX, TIB    ; SAVE THE ADDRESS OF TIB FOR WORD
+PUSH EAX
+PUSH 34         ; PUSH ASCII "
+PUSH $ + 10
+JMP do_DOCOL
+DD do_WORD      ; PARSE INPUT STRING  TIB " WORD
+DD do_COUNT     ; GET LENGTH
+DD do_PAD, do_SWAP   ; MOVE THE DATA IN THE TIB TO THE DATA AREA
+DD do_2DUP, do_2TOR, do_CMOVE, do_2RFROM
+DD do_TYPE
+DD do_PUSH1, do_IN, do_FETCH  ; 1 _IN @ + _IN !     INCREMENT THE _IN OFFSET
+DD do_PLUS, do_IN, do_STORE
+DD do_PAD, do_ZCOUNT, do_ERASE
+DD do_SEMI
+;
+_PAUSE:         ; ( N -- ) PAUSE FOR N MILLISECONDS          VERIFIED
+DD _DOTP
+DD do_PAUSE
+DB 5, 'PAUSE'
+do_PAUSE:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_MS, do_PLUS
+DD do_BEGIN@
+DD do_MS, do_OVER, do_GT, do_EQU0
+DD do_UNTIL@
+DD do_DROP
+DD do_SEMI
+NEXTC
+;
+_KEY:       ; ( -- C )  INPUTS A CHARACTER FROM KEYBOARD
+DD _PAUSE
+DD do_KEY  
+db 3, 'KEY'
+do_KEY:
+
+NEXTC
+;
+_KEYQ:      ; ( -- N ) CHECK FOR CHARACTER IN BUFFER
+DD _KEY
+DD do_KEYQ
+DB 4,'KEY?'
+do_KEYQ:
+Invoke GetNumberOfConsoleInputEvents, 0, KEYIN
+NEXTC
+;
+_ALLOT:         ; ( n -- ) \ allocate n bytes at HERE, increment DP         VERIFIED
+DD _KEYQ        ; DUP 1000 + ?MEMCHK DP +! ;
+DD do_ALLOT
+DB 5, 'ALLOT'
+do_ALLOT:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_DUP, do_LIT, 1000, do_PLUS
+DD do_MEMQ, do_LT
+DD do_IF@, do_DPR, do_PLUSSTORE, do_PUSH0
+DD do_THEN@, do_DROP
+DD do_SEMI
+;
+_TICK:      ; ( -- ADDR ) RETURNS THE CFA OF THE NEXT INPUT WORD   VERIFIED 231214
+DD _ALLOT
+DD do_TICK
+DB 1, "'"
+do_TICK:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TIB, do_BL, do_WORD, do_COUNT, do_FIND
+DD do_SEMI
+;
+_TO:                        ; VERIFIED 231201
+DD _TICK 
+DD do_TO
+DB 2, 'TO'
+do_TO:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TIB, do_BL, do_WORD, do_COUNT, do_FIND
+DD do_VALUESTORE
+DD do_SEMI
+;
+_PTO:                        ; VERIFIED 231201
+DD _TO 
+DD do_PTO
+DB 3, '+TO'
+do_PTO:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TIB, do_BL, do_WORD, do_COUNT, do_FIND
+DD do_VALPLUSTORE
+DD do_SEMI
+;
+_ZCOMMAQ:             ; Z,"  ( -<string">- )  \ compile string delimited by " as uncounted
+DD _PTO               ;      chars null-terminated chars at here
+DD do_ZCQ             ;      HERE [CHAR] " PARSE Z", 0 C, ALIGN ZCOUNT \N->CRLF
+DB 3,'Z,"'        
+do_ZCQ:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_HERE, do_LIT, '"', do_PARSE
+; DD do_ZQC, do_PUSH0, 
+
+DD do_SEMI
+;
+_ANEW:              ; MARKER FOR USE OF FORGET      VERIFIED 231205
+DD _ZCOMMAQ
+DD do_ANEW
+DB 4, 'ANEW'
+do_ANEW:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_TIB, do_BL, do_WORD, do_COUNT
+DD do_NEWHEADER 
+DD do_GCFA, do_NOOP, do_NFA, do_LIT, 4, do_MINUS,  do_STORE 
+DD do_SEMI
+;
+_WORDS:     ; listing of dictionary words          VERIFIED
+DD _ANEW
+DD do_WORDS
+DB 5, 'WORDS'
+do_WORDS:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_PAD, do_LIT, 160, do_ERASE
+DD do_PAD, do_HLD, do_STORE, do_PUSH0, do_TV1, do_STORE
+DD do_LATEST, do_FETCH
+DD do_BEGIN@
+DD do_DUP, do_LIT, 8, do_PLUS, do_DUP, do_PUSH1, do_PLUS, do_SWAP, do_CFETCH, do_DUP, do_TOR ; SAVE LENGTH
+DD do_HLD, do_FETCH, do_SWAP, do_CMOVE, do_FROMR    ; RECOVER LENGTH
+DD do_PUSH1, do_TV1, do_PLUSSTORE                   ; INCREMENT COUNTER
+DD do_LIT, 16, do_SWAP, do_MINUS, do_PAD, do_ZCOUNT, do_PLUS, do_SWAP
+DD do_LIT, 32, do_FILL                              ; ADD SPACES TO END OF THE BUFFER 
+DD do_LIT, 12, do_HLD, do_PLUSSTORE
+DD do_TV1, do_FETCH, do_LIT, 8, do_EQU
+DD do_IF@
+DD do_PAD, do_ZCOUNT, do_TYPE, do_CR, do_LIT, 100, do_PAUSE
+DD do_PUSH0, do_TV1, do_STORE, do_PAD, do_ZCOUNT, do_LIT, 0, do_FILL
+DD do_PAD, do_HLD, do_STORE
+DD do_THEN@
+DD do_FETCH, do_DUP, do_0NE
+DD do_UNTIL@
+DD do_TV1, do_FETCH, do_LIT, 0, do_GT
+DD do_IF@
+DD do_PAD, do_ZCOUNT, do_TYPE, do_CR, do_CR
+DD do_PUSH0, do_TV1, do_STORE, do_PAD, do_ZCOUNT, do_LIT, 0, do_FILL
+DD do_THEN@
+DD do_SEMI
+;
+_CTYPE:  ; ( STRING, LEN -- )       VERIFIED 231208
+DD _WORDS
+DD do_CTYPE
+DB 5, 'CTYPE'
+do_CTYPE:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_BEGIN@
+DD do_TOR
+DD do_DUP, do_CFETCH, do_CMAX, do_EMIT
+DD do_1PLUS
+DD do_FROMR, do_1MINUS, do_DUP
+DD do_UNTIL@, do_2DROP
+DD do_SEMI
+;
+_DUMP:         ; ( ADDR, N --  )  VERIFIED 231215
+DD _CTYPE
+DD do_DUMP
+DB 4, 'DUMP'
+do_DUMP:
+POP TV1         ;  # OF BYTES TO DUMP
+POP TV2         ; ADDRESS TO DUMP
+PUSH $ + 10
+JMP do_DOCOL
+DD do_CR
+@DLOOP1:
+DD do_PAD, do_HLD, do_STORE
+DD do_TV2, do_FETCH, do_TV1, do_FETCH, do_PLUS     ; CALC END POINT AND SAVE
+DD do_BEGIN@, do_TOR                               ; BEGIN0
+DD do_HLD, do_FETCH, do_TV2, do_FETCH, do_I2HEX    
+DD do_ZCOUNT, do_TYPE
+DD do_SEP1, do_ZCOUNT, do_TYPE
+DD do_PAD, do_ZCOUNT, do_ERASE
+DD do_LIT, 4, do_BEGIN@, do_TOR                   ; BEGIN1
+DD do_TV2, do_FETCH, do_FETCH, do_BEXT
+DD do_LIT, 4, do_BEGIN@, do_TOR                   ; BEGIN2
+DD do_BTOH, do_PAD, do_ZCOUNT, do_TYPE, do_LIT, 32, do_EMIT
+DD do_FROMR, do_1MINUS, do_DUP  
+DD do_UNTIL@                                        ; UNTIL2
+DD do_DROP 
+DD do_TV2, do_DUP, do_FETCH, do_LIT, 4, do_PLUS, do_SWAP, do_STORE ; TV2 DUP @  4 + SWAP !
+DD do_FROMR, do_1MINUS, do_DUP  
+DD do_UNTIL@                                        ; UNTIL1
+DD do_DROP, do_SEP1, do_ZCOUNT, do_TYPE
+DD do_LIT, 125, do_PAUSE
+DD do_TV2, do_FETCH, do_LIT, 16, do_MINUS, do_LIT, 16, do_CTYPE
+DD do_SEP1, do_ZCOUNT, do_TYPE, do_CR
+DD do_FROMR, do_DUP, do_TV2, do_FETCH, do_MINUS, do_0GT
+DD do_UNTIL@                                        ; UNTIL0
+DD do_DROP, do_CR
+DD do_SEMI
+;
+_FILEEXIST:         ; ( ADDR -- F )  0 = FILE EXIST   -1 = FILE NOT FOUND   VERIFIED 231213
+DD _DUMP
+DD do_FILEEXIST
+DB 10, 'FILE-EXIST'
+do_FILEEXIST:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_LIT, 80000000H, do_FILEOPEN, do_SWAP, do_DUP, do_0GT
+DD do_IF@, do_FILECLOSE, do_DROP, do_ELSE@, do_NIP
+DD do_THEN@
+DD do_SEMI
+;
+h_COMPILE:
+DD _FILEEXIST
+DD do_COMPILECOMMA
+db 8, 'COMPILE,'
+do_COMPILECOMMA:
+PUSH $ + 10
+JMP do_DOCOL
+DD do_COMPILE
+DD do_COMMA
+DD do_SEMI
+;
+EOC:
+;
+END Start
