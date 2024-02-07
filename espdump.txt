@@ -1,0 +1,87 @@
+(  ESPDUMP.TXT  )
+\ Goal: Allways show all requested bytes (and may be some more), at least in 1 full line!
+\ Developed on ESP32Forth 7.0.5     OBS:
+\ With "0xDUMP" dump line will always start on an address  with low order nibble = 0 e.g.:  FF4CAAA0 
+\ With "xDUMP"  dump line will always start on the exact address you enetred
+\ Warning:      Dumping an "illegal address" will chrash Forth and your ESP32 will restart! (like original DUMP)
+\ Dump formatting:
+\  12345678 00 11 22 33 44 55 66 77 - 00 11 22 33 44 55 66 77  AAAAAAAA BBBBBBBB 
+\  Offset   ----------8Bytes-------   ----------8Bytes-------  -------USASCII---
+
+base @	\ remember current base at compile tile
+hex	\ all dumping must show HEX bytes
+
+variable myOffset
+variable myLineCount
+   	 
+: MyOffset. 	myOffset @ <# # # # # # # # #s #> TYPE space  ;    \ Print a 32bit ADR, 8 CHARS WIDE
+: Byte. 		<# # #s #>  type space ;			           \ Print a byte (2 nibbles) and a space
+: b>c. 		dup 21 < if drop 7E then dup 7E > if drop 7E then emit ;  \ Print a valid USASCII char or a "~" (7E)
+\		 "." not used as normal seen in dumps, as a "." is often used in FORTH code
+
+: 8Bytes. 		8 0 
+		do myOffset @ 
+		    dup  
+		    c@ Byte.
+		   1+ myOffset !
+		loop 
+;
+
+: RememberBase	base @		( adr n  --- adr n base)    \ remember current base
+		-rot		( --- base adr n )
+		hex		\ DUMP must show HEX bytes, run time base
+;
+
+: DoDump
+	begin	cr MyOffset.  8Bytes.  ." - "   8Bytes. 
+		\ hex bytes printed, now show valid USACII code bytes, or an "." :
+		myOffset @ 10 - 
+		myOffset !  \ go back 16 bytes again, and now print 16 USASCII chars:
+		space
+		10 0	do myOffset @	\ print 16 USASCII chars
+			    dup 
+			    1+ myOffset !
+			    c@ b>c.			    
+			    I 7 = if space then \ insert a blank seperator after 8 USASCII chars
+			loop
+		myLineCount @ 1-  \ dump next line
+		dup myLineCount ! ( all lines printed? )
+		0=		( --- flag )
+	until
+	cr	( --- base  )
+	base !	( --- ) 		\ reset to org. base
+;
+
+: my0xDumpPrep   		over 	( adr n --- adr n adr )
+			000F and ( --- adr n xtra )
+			+  	( --- adr #BytesToPrint? )
+			1- 0 max ( --- adr #BytesToPrint )
+			10 /	( --- adr #LinesToPrint? )
+			1+
+			myLineCount !  ( --- adr )
+			FFFFFFF0 and  myOffset !    \ dump min. 16 bytes aligned  nnnnnnn0
+;
+
+: 0xDUMP     ( adr n --- ) 	\ "Zero Hex DUMP"
+
+	RememberBase
+	my0xDumpPrep  	( --- base  )
+	DoDump 
+
+;
+
+: myxDumpPrep 		(  adr n --- adr n  )
+			10 max	\ dump min. 16 bytes / 1 full line
+			10 /mod	( --- adr remain lines)
+			swap ( --- adr lines remain)
+			if 1+ then
+			myLineCount !  ( --- adr )
+			myOffset !  ;  
+
+: xDUMP     ( adr n --- ) 	\ "Hex DUMP" start dump at any "odd address" of your choosing :-)
+	RememberBase
+	myxDumpPrep  	( --- base  )
+	DoDump ;
+;
+
+base !	\ back to  former base

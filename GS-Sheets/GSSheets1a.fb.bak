@@ -1,0 +1,128 @@
+( Block 0 )                                                    
+\ ESP_GOOGLE_SHEET_CLIENT                                      
+: GS_Sheet_client ;                                            
+Create WIFI_SSID  z" Guest_Ext" drop                           
+Create WIFI_PASSWORD z" PinA1953!" drop                        
+Create PROJECT_ID z" fjr38835" drop                            
+Create CLIENT_EMAIL                                            
+ z" fjr-forth@fjr38835.iam.gserviceaccount.com"  drop          
+Create spreadsheetId z" ESP32 Datalogging" drop                
+Create ntpServer z" pool.ntp.org" drop                         
+Variable LastTime 0 LastTime !                                 
+Variable TimerDelay 30000 TimerDelay !                         
+Variable epochTime 0 epochTime !                               
+Variable _ready 0 _ready !                                     
+0 Value PRIVATE_KEY  0 Value FilePtr1                          
+0 value infostatus 0 value tokenerror 0 value tokentype        
+( Block 1 )                                                    
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 2 )                                                    
+: tokenstatus  ( tokeninfo info -- )                           
+infostatus tokenerror = IF                                     
+z" Token Info: Type = " GSPrintF                               
+z" Token Error: " GSPrintF                                     
+Else z" Token Info: Type = " GSPrintF Then ;                   
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 3 )                                                    
+: timer1 ms-ticks lastTime - timerDelay >                      
+IF ms-ticks lastTime ! -1 Else 0 Then ;                        
+forth also streams also wifi                                   
+: ip. ( n -- )                                                 
+2 for 256 U/MOD next >r >r >r                                  
+. 46 emit r> . 46 emit r> . 46 emit r> . ;                     
+: WIFI-Setup    \ Setup WIFI                                   
+WIFI_SSID WIFI_PASSWORD wifi.begin 2000 ms wifi.status         
+3 = IF ." Connected" cr WiFi.localIP ." IP address = "  ip. cr 
+Else ." Not Connected" cr Then ;                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 4 )                                                    
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 5 )                                                    
+: timer1 ms-ticks lastTime - timerDelay >                      
+IF ms-ticks lastTime ! -1 Else 0 Then ;                        
+\                                                              
+forth also streams also wifi                                   
+: GSsetup                                                      
+WIFI-Setup  ( Configure Time ) \ ntpServer Cfigtime            
+1800 allocate 0= IF to PRIVATE_KEY Else Drop Then              
+s" /spiffs/GSSheet_key.txt" r/o Open-File                      
+not IF to FilePtr1 PRIVATE_KEY 1750 fileptr1 read-file drop    
+fileptr1 close-file drop Else Drop Then                        
+s" ESP Google Sheet Client" type cr                            
+' tokenstatus GSheet.setTokenCallback                          
+600 setrefresh PRIVATE_KEY PROJECT_ID CLIENT_EMAIL GSBegin     
+;                                                              
+                                                               
+( Block 6 )                                                    
+: GSClose                                                      
+PRIVATE_KEY free drop                                          
+  cr ." Process Completed" cr  wifi.disconnect 200 ms          
+  wifi.status ." wifi.status - " .                             
+;                                                              
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+                                                               
+( Block 7 )                                                    
+: GSMain                                                       
+GSsetup                                                        
+Begin                                                          
+0 GSReady _ready ! timer1                                      
+IF                                                             
+response FirebaseJson                                          
+cr ." Append Spreadsheet Values..." cr                         
+valueRange FirebaseJson                                        
+Then                                                           
+Until                                                          
+GSClose                                                        
+;                                                              
+                                                               
+                                                               
+                                                                
