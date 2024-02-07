@@ -1,0 +1,28 @@
+No Errors 
+        Fig-Forth vs 2.53 
+            FJRusso 
+Thursday, January 18, 2024 2:45:10 PM  
+Press ENTER to continue ---   
+EMPTY 
+Text Interpreter entered  
+ok 
+Wait Key --  
+Exiting FORTH 
+Fig Forth Beginning 
+ERROR OCCURED -  
+- NOT FOUND 
+Data Section -  
+Core Space -  
+Appl Space -  
+bytes used 
+bytes free 
+Words in Dictionary - 
+Failure to Allocate memory 
+Process ABORTED  
+Process Terminated 
+Stack Underflow ERROR 
+Stack Overflow ERROR 
+PAUSE ... 
+Variables, Constants, Values - 
+Core Words - 
+Compiled Words - 

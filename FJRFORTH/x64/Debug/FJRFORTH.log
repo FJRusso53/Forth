@@ -1,0 +1,33 @@
+﻿  Assembling ForthCore.asm...
+ForthCore.asm(9): error A2008: syntax error : .
+ForthCore.asm(10): error A2008: syntax error : .
+ForthCore.asm(11): error A2008: syntax error : .
+ForthCore.asm(20): error A2008: syntax error : RSP
+ForthCore.asm(44): error A2070: invalid instruction operands
+ForthCore.asm(47): error A2024: invalid operand size for instruction
+ForthCore.asm(55): error A2024: invalid operand size for instruction
+ForthCore.asm(63): error A2070: invalid instruction operands
+ForthCore.asm(64): error A2024: invalid operand size for instruction
+ForthCore.asm(72): error A2024: invalid operand size for instruction
+ForthCore.asm(81): error A2070: invalid instruction operands
+ForthCore.asm(82): error A2024: invalid operand size for instruction
+ForthCore.asm(90): error A2024: invalid operand size for instruction
+ForthCore.asm(98): error A2070: invalid instruction operands
+ForthCore.asm(99): error A2024: invalid operand size for instruction
+ForthCore.asm(107): error A2070: invalid instruction operands
+ForthCore.asm(108): error A2024: invalid operand size for instruction
+ForthCore.asm(115): error A2070: invalid instruction operands
+ForthCore.asm(116): error A2070: invalid instruction operands
+ForthCore.asm(119): error A2024: invalid operand size for instruction
+ForthCore.asm(128): error A2024: invalid operand size for instruction
+ForthCore.asm(138): error A2024: invalid operand size for instruction
+ForthCore.asm(145): error A2024: invalid operand size for instruction
+ForthCore.asm(251): error A2070: invalid instruction operands
+ForthCore.asm(255): error A2070: invalid instruction operands
+ForthCore.asm(256): error A2070: invalid instruction operands
+ForthCore.asm(258): error A2070: invalid instruction operands
+ForthCore.asm(261): error A2070: invalid instruction operands
+ForthCore.asm(272): error A2024: invalid operand size for instruction
+ForthCore.asm(276): error A2008: syntax error : main
+ForthCore.asm(276): error A2088: END directive required at end of file
+C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\BuildCustomizations\masm.targets(70,5): error MSB3721: The command "ml64.exe /c /nologo /Zi /Fo"x64\Debug\ForthCore.obj" /W3 /errorReport:prompt  /TaForthCore.asm" exited with code 1.
