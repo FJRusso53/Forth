@@ -1,0 +1,256 @@
+( Block 0 ) : Freezer-Monitor ;                                
+\                                                              
+forth also streams also httpd also web-interface               
+\                                                              
+0 Value Button 15000 Value 15Sec 0 Value ETA                   
+0 Value FStatus 0 Value PFStatus ( Status of Freezer Line )    
+0 Value StartTime 0 Value LogFilePtr 0 Value HTML-FP 0 Value D5
+0 Value LogFileBuf 0 Value D1 0 Value D2 0 Value D3 0 Value D4 
+0 Value Stat-Change 0 Value Sensor-Read 0 Value HrT 0 Value MnT
+0 Value SecT 0 Value Temp1 0 Value workbuf 0 Value HTML-FID    
+0 Value HTML-FS 0 Value HTML-FB 0 Value header0 0 Value Ptemp  
+0 Value image-req 13 Value pin_button 0 Value RmT 0 Value D6   
+0 Value File-buffer 0 Value Filesize 0 Value file-id           
+$FFFF Value FBsize                                             
+\                                                              
+\                                                              
+( Block 1 )                                                    
+Create msg1                                                    
+z"   HH:MM:SS               F           F               OFF "  
+Create msg2                                                    
+z" **********************************************************" 
+Create msg3                                                    
+z"   Time               Freezer     Ambient            Status "
+Create msg4 z"   Date: 230112 "  ..                            
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+( Block 2 )                                                    
+: Init-Vars  cr ." Init-Vars" cr                               
+0 to Button 0 to FStatus 0 to StartTime 0 to LogFilePtr        
+0 to HTML-FID 0 to Stat-Change 48 to Temp1                     
+1024 allocate not IF to LogFileBuf LogFileBuf 1024 0 fill Then 
+1024 allocate not IF to workbuf workbuf 1024 0 fill Then       
+80 allocate not IF to image-req image-req 80 0 fill Then       
+FBsize allocate drop to file-buffer file-buffer FBsize 0 fill  
+pin_button input pinmode ;                                     
+\                                                              
+: Elapsed-time ( -- ) ms-ticks starttime - 1000 /              
+dup >r 3600 / to HrT r@ 60 / HrT 60 * - to MnT                 
+r> hrt 3600 * - mnt 60 * - to SecT ;                           
+\                                                              
+\                                                              
+\                                                              
+( Block 3)                                                     
+: SPF-LogFile  ( str n ---  )                                  
+LogFilePtr write-file drop 50 ms LogFileBuf z>s 0 fill ;       
+\                                                              
+: Prt-Prep ( A N -- a1 n1)                                     
+LogFileBuf z>s + swap cmove LogFileBuf z>s ;                   
+\                                                              
+: ICR ( a n -- a n )                                           
+2dup + 13 swap c! drop dup z>s + 10 swap c! z>s ;              
+\                                                              
+: >string ( n a -- ) >r <# # # #> r> swap cmove ;              
+: Fill-Time                                                    
+workbuf 1024 0 fill msg1 z>s workbuf swap cmove Elapsed-time   
+HrT workbuf 2 + >string MnT workbuf 5 + >string                
+SecT workbuf 8 + >string ;                                     
+\                                                              
+( Block 4 )                                                    
+: Init-Display                                                 
+LogFileBuf z>s 0 fill LogFileBuf 0 ICR 2drop                   
+Msg2 z>s Prt-Prep ICR SPF-LogFile                              
+Msg4 z>s Prt-Prep ICR SPF-LogFile                              
+Msg3 z>s Prt-Prep ICR SPF-LogFile                              
+Msg1 z>s Prt-Prep ICR SPF-LogFile ;                            
+\                                                              
+: CtoF ( N -- N )  90 * 50 / 320 + ;                           
+\                                                              
+: F>string ( n1 -- ) workbuf z>s 0 fill                        
+<# # [char] . HOLD #S #> workbuf swap cmove ;                  
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+( Block 5 )                                                    
+: TC-Init ( -- )  ( Initialize Thermocouples )                 
+." Initializing TC's -- " 0 14 22 36 MAXBEGIN                  
+." Completed" cr ." Reading TC1"                               
+ 0 MAXTCDATA 9 emit ctof <# # [char] . HOLD #S #> type cr      
+DSStart 0 DSTempF 10 / to RmT ;                                
+\                                                              
+(  Acquire TC Data )                                           
+: Get-TC ( -- ud )  cr ." Get-TC :  "                          
+0 MAXTCDATA ctof 10 / to Temp1 Temp1 . 9 emit                  
+Temp1 PTemp <> IF Temp1 to PTemp                               
+-1 to Stat-Change Then 50 ms                                   
+0 DSTempF 10 / dup to RmT ." Ambient Temp :  " .               
+9 emit ." Time: " Fill-Time workbuf 10 type cr ;               
+\                                                              
+\                                                              
+( Block 6) : get-headers ." Get-Headers" cr                    
+( Load Header Pointers to file buffer)                         
+html-fb to header0 header0 z" XDATEX" strstr                   
+dup to html-fp dup 0 > IF z" XX" strstr to D1                  
+D1 dup 0 > IF  2 + z" XX" strstr to D2                         
+D2 dup 0 > IF  2 + z" XX" strstr to D3                         
+D3 dup 0 > IF  2 + z" XX" strstr to D4                         
+D4 dup 0 > IF  2 + z" XX" strstr to D6                         
+D6 dup 0 > IF  2 + z" XXX" strstr to D5                        
+Then Then Then Then Then Then                                  
+s" 230112" html-fp swap cmove ;                                
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+( Block 7) : Get-Line (  --  ) ."  Read circuit sensor  " cr   
+\ 0 = No Change in Status    -1 = Change in Status             
+0 A712mA 10 > If 1 to FStatus Else 0 to FStatus Then           
+FStatus PFStatus <> IF FStatus to PFStatus -1 to Stat-Change   
+Then ;                                                         
+\                                                              
+: Get-button1 (  --  )                                         
+0 to Button pin_button digitalread not to Button ;             
+\                                                              
+: Get-button ( -- )                                            
+0 to Button key? If key to Button then ;                       
+\                                                              
+\                                                              
+ : Delay5 (   --  ) \ 5 second Delay                           
+5 0 Do 1000 ms Get-Button1 button If leave Then Loop ;         
+\                                                              
+( Block 8 )                                                    
+: Img-load                                                     
+  to file-id  ." File exist "                                  
+  file-id file-size drop to filesize                           
+  file-buffer FBSize 0 fill                                    
+  ." ID = " file-id . ."   Size = " filesize . cr              
+  file-buffer filesize file-id read-file 2drop                 
+  file-id close-file drop 0 to file-id                         
+  ." file loaded " cr ;                                        
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+( Block 9 ) : Update-Disp ." Update-Disp" cr                   
+HrT D1 >string MnT D2 >string SecT D3 >string                  
+temp1 D4 >string Rmt D6 >string                                
+Sensor-read 0 > IF s"  ON" Else s" OFF" Then                   
+D5 swap cmove ;                                                
+\                                                              
+ : Update-Log ( -- )  ." Update-Log" cr                        
+Fill-Time                                                      
+temp1 workbuf 22 + >string                                     
+RmT workbuf 34 + >string Sensor-read 0 >                       
+IF s"  ON" Else s" OFF" Then workbuf 53 + swap Cmove           
+workbuf z>s Prt-Prep ICR SPF-LogFile ;                         
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+( Block 10)                                                    
+also httpd also wifi                                           
+: image-page cr ." Request for image from client" 9 emit       
+image-req z>s 2dup type cr dup 2 >  IF r/o open-file           
+0= ." File Opened " cr IF Img-load file-buffer filesize        
+." sending image -- " s" image/png" ok-response 250 ms .s cr   
+send 200 ms ." Image sent" cr                                  
+Else Drop cr ." File Not Found" cr notfound-response Then      
+Else 2drop cr ." Not Image File" cr notfound-response Then     
+pause ;                                                        
+\                                                              
+: page-html ." page-html" cr                                   
+  ." Page-HTML output - "  \ A Tracking Prompt                 
+  s" text/html" ok-response 250 ms                             
+  header0 z>s send 250 ms   ."  Sent" cr ;                     
+\                                                              
+( Block 11 ) : HTML-Load  ." HTML-Load" cr                     
+HTML-FID file-size drop to HTML-FS ( get size)                 
+HTML-FS 256 + allocate not IF to HTML-FB ( allocate memory)    
+HTML-FB HTML-FS 256 + 0 fill Then                              
+HTML-FB HTML-FS HTML-FID read-file ( load to buffer)           
+2drop HTML-FID close-file drop 0 to HTML-FID ( close)          
+HTML-FB HTML-FS 0 DO ( change tab 09 to space 32 )             
+dup c@ 9 = If dup 32 swap c! Then 1+ Loop drop                 
+HTML-FB to HTML-FP cr ." HTML page Loaded" cr ;                
+\                                                              
+: serve-page  ." Serve-Page" cr                                
+  ." Requesting > " path type ."  <" cr                        
+  path s" /" str= IF page-html else image-page Then ;          
+\                                                              
+\                                                              
+\                                                              
+( Block 12 ) : Close-Files  ." Close Files" cr                 
+Fill-Time update-log update-disp                               
+LogFileBuf z>s ICR 2drop Msg2 z>s Prt-Prep ICR SPF-LogFile     
+LogFilePtr close-file drop                                     
+HTML-FID close-file drop ;                                     
+\                                                              
+: Free-space ." Free-Space" cr                                 
+LogFileBuf dup not IF Free to LogFileBuf Else drop Then        
+workbuf dup not IF Free to workbuf Else drop Then              
+HTML-FB dup not IF Free to HTML-FB Else drop Then              
+image-req dup not IF Free to image-req Else drop Then ;        
+\                                                              
+: Stat ( Check for change in Status Flag )  ." STAT" cr        
+Stat-Change IF Update-Log Update-Disp                          
+0 to Stat-Change Then ;                                        
+\                                                              
+( Block 13 )  : Open-Files   ." Open Files" cr                 
+( Open Data Logging File )                                     
+ s" /spiffs/FreezerLog.txt" w/o Open-File                      
+not IF to LogFilePtr 0                                         
+LogFilePtr File-Size drop LogFilePtr REPOSITION-FILE drop      
+( Open HTML File ) S" /spiffs/Freezer-Monitor.html"            
+r/o Open-File not IF to HTML-FID 0 to HTML-FP Else drop -1     
+." Failed to Open HTML File" cr Then                           
+Else ." Failed to open Log File" cr -1                         
+Then ;                                                         
+\                                                              
+: ACS-Init ACS712begin ;                                       
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+( Block 14 ) : Process ( Main Routine)                         
+\                                                              
+Init-Vars ms-ticks to StartTime Open-Files not IF TC-init      
+ACS-init Init-Display Get-TC 0 to FStatus ( Freezer power off )
+HTML-Load HTML-FB 0 >                                          
+  IF 250 ms get-headers                                        
+z" F&Mhome2.4_Ext" z" PinA1953" login 80 server pause          
+\                                                              
+Begin ..                                                       
+Get-TC Get-Line Stat 15Sec Ms-Ticks + to ETA                   
+." 15 Second Delay - Press button to Terminate.."              
+Begin get-button1 handleClient If                              
+update-log update-disp                                         
+cr ." SockFD = " sockfd . 9 emit ." ClientFD = " clientfd . cr 
+  ." Chunk : " chunk chunk-size type cr serve-page Then        
+\                                                              
+( Block 15 ) \ Continuation of Process                         
+\                                                              
+Button Ms-ticks ETA > or Until                                 
+Button Until                                                   
+Close-Files                                                    
+Free-space                                                     
+  cr ." Process Completed" cr wifi.disconnect 200 ms           
+  wifi.status drop Then Then .. ;                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              
+\                                                              

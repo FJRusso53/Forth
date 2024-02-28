@@ -1,0 +1,223 @@
+( Block 0 ) : FJR-Brew ;
+0 Value SPBUFFER 0 Value workbuf 0 Value logfhndl
+0 Value HLT-Heater 0 Value Boil-Heater ( Heaters OFF)
+0 Value VacP1 0 Value VacP2   ( Vac Pumps OFF)
+0 Value Cyc-End 0 value wait-period 0 value keybuf
+2 value pinled 13 value pinbutton
+75 Value Boil-Time 60 Value Mash-Time 152 Value Mash-Temp
+Variable TC1 Variable TC2 Variable TC3 Variable Start-time
+64 allocate to keybuf keybuf 64 0 fill
+\
+
+
+
+
+
+
+( Block 1 ) ( Brewery Control Variables )
+: Init-Variables
+cls ." Init Variables -- "
+0 To HLT-Heater 0 To Boil-Heater ( Heaters OFF)
+0 To VacP1 0 To VacP2   ( Vac Pumps OFF)
+75 To Boil-Time 60 To Mash-Time 152 To Mash-Temp
+ms-ticks 1000 / start-time !  64 allocate to keybuf
+1088 allocate to SPBUFFER  1088 allocate to workbuf
+pinled output pinmode pinbutton input pinmode
+pinled low digitalwrite
+s" /spiffs/LogFile.txt" w/o open-file 0=
+IF ." Log File Opened" cr to logfhndl
+logfhndl file-size drop logfhndl reposition-file drop
+ELSE ." Log File Failure " cr THEN
+." Complete" cr ;
+
+( Block 2 )
+: SPF-LogFile  ( str n --- ior )
+logfhndl write-file  50 ms drop ;
+\
+: Prt-Prep ( A N -- a1 n1 \ prep output buffer)
+workbuf z>s + swap cmove workbuf z>s ;
+\
+: ICR ( a n -- a n ) \ Insert 0Dh0Ah to end of line
+2dup + 13 swap c! drop dup z>s + 10 swap c! z>s ;
+\
+: wait ( n -- ) \ Controlled delay with keyboard checking
+ms-ticks + wait-period to Begin key? IF keybuf 64 accept
+cr ." Keyboard: " keybuf z>s type cr keybuf 64 0 fill THEN
+ms-ticks wait-period > Until ;
+
+
+( Block 3 )
+: cycle-exit (  --  )
+." Press button to advance to next cycle" cr
+pinled high digitalwrite
+begin pinbutton digitalread 0= until
+pinled low digitalwrite ..  ;
+
+
+
+
+
+
+
+
+
+
+( Block 4 )
+: F>string ( n3 n2 n1 -- )
+workbuf z>s + 9 swap c!
+<# # [char] . HOLD #S #> workbuf z>s + swap cmove
+workbuf z>s + 9 swap c!
+<# # [char] . HOLD #S #> workbuf z>s + swap cmove ;
+\
+: CtoF ( N -- N ) ( Convert ?C to ?F )
+90 * 50 / 320 + ;
+\
+: >string ( n a -- )
+ >r dup >r abs <# #s r> sign #>
+ r@ swap cmove r> drop ;
+\
+
+
+( Block 5 )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+( Block 6 )
+: TC-Init ( -- ) ( Initialize Thermocouples )
+." Initializing TC's -- "
+0 14 22 36 MAXBEGIN
+1 14 21 36 MAXBEGIN
+2 14 12 36 MAXBEGIN
+." Completed" cr ." Reading TC1"
+0 MAXTCDATA 9 emit ctof <# # [char] . HOLD #S #> type cr
+." Reading TC2"
+1 MAXTCDATA 9 emit ctof <# # [char] . HOLD #S #> type cr
+." Reading TC3"
+2 MAXTCDATA 9 emit ctof <# # [char] . HOLD #S #> type cr
+cr ;
+
+
+
+( Block 7  Acquire TC Data )
+: TCDataAcq ( -- )
+2 MAXTCDATA ctof dup TC3 ! ( TC3 -- )
+1 MAXTCDATA ctof dup TC2 ! ( Tc3 Tc2 -- )
+0 MAXTCDATA ctof dup TC1 !  ( TC3 TC2 TC1 -- )
+F>string workbuf z>s ICR workbuf z>s logfhndl write-file .. ;
+\
+: TCDAcq (    -- tc3 tc2 tc1 )
+2 MAXTCDATA ctof dup TC3 ! ( TC3 -- )
+1 MAXTCDATA ctof dup TC2 ! ( Tc3 Tc2 -- )
+0 MAXTCDATA ctof dup TC1 !  ( TC3 TC2 TC1 -- )
+;
+
+
+
+
+( Block 8 ): Pre-Heat ( Preheat HLT & Mash water )
+workbuf z>s 0 fill workbuf 0 ICR
+s" Pre-Heat Start Time:  " 2dup type
+9 emit ms-ticks 1000 / start-time @ - dup . cr
+>R prt-prep + R> swap >string workbuf z>s ICR SPF-LogFile
+ms-ticks 1 60 * 1000 * + to Cyc-End
+Begin
+workbuf z>s 0 fill
+TCDataAcq
+workbuf z>s type
+6000 ms ms-ticks Cyc-End > Until
+." Pre-Heat Completed" 9 emit ms-ticks 1000 /
+start-time @ - . cr  cycle-exit ;
+
+
+
+( Block 9)
+: Mash-Cycle ( Monitor & Time Mash cycle )
+workbuf z>s 0 fill workbuf 0 ICR
+s" Mash-Cycle Start Time: " 2dup type
+9 emit ms-ticks 1000 / start-time @ - dup . cr
+>R prt-prep + R> swap >string workbuf z>s ICR SPF-LogFile
+ms-ticks 1 60 * 1000 * + to Cyc-End
+Begin
+workbuf z>s 0 fill
+TCDataAcq
+workbuf z>s type
+6000 ms ms-ticks Cyc-End > Until
+." Mash-Cycle Completed" ms-ticks 1000 / start-time
+@ - 9 emit . cr cycle-exit ;
+
+
+( Block 10 ) : Boil-Cycle ( Control Heat & Timing of Boil)
+workbuf z>s 0 fill workbuf 0 ICR
+s" Boil-Cycle start time: " 2dup type
+9 emit ms-ticks 1000 / start-time @ - dup . cr
+>R prt-prep + R> swap >string workbuf z>s ICR SPF-LogFile
+ms-ticks 1 60 * 1000 * + to Cyc-End
+begin
+workbuf z>s 0 fill
+TCDataAcq
+workbuf z>s type
+6000 ms ms-ticks Cyc-End > Until
+." Boil-Cycle Completed" ms-ticks 1000 / start-time
+ @ - 9 emit . cr cycle-exit ;
+
+
+
+( Block 11 )
+: Brew-Process ( Controlling Routine )
+Init-Variables ( Baseline control parameters)
+logfhndl 0 > IF workbuf z>s 0 fill workbuf 0 ICR
+s" ***********************************************************"
+2dup cr type cr prt-prep ICR SPF-LogFile
+workbuf z>s 0 fill workbuf 0 ICR
+s" Date: 220915 Dunkel Bock"  prt-prep ICR SPF-LogFile
+workbuf z>s 0 fill workbuf 0 ICR
+TC-Init Pre-Heat Mash-cycle Boil-Cycle
+
+
+
+
+
+
+( Block 12 )
+workbuf z>s 0 fill 13 workbuf c! 10 workbuf 1+ c!
+s" Process Closed"  prt-prep SPF-LogFile
+workbuf z>s 0 fill 13 workbuf c! 10 workbuf 1+ c!
+s" ***********************************************************"
+2dup cr type cr prt-prep SPF-LogFile
+workbuf z>s 0 fill 13 workbuf c! 10 workbuf 1+ c!
+logfhndl close-file drop
+ELSE s" Process Aborted" cr type cr THEN ;
+
+
+
+
+
+
+                                                                ( Block 13 )
+: test1
+TC-Init TCBegin
+15 DSStart ..
+345 0 do TCDAcq
+i . . . .
+1 DSTempf .
+key?
+IF quit THEN
+cr Loop ;
+
+
+
+
+
+
