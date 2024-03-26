@@ -29,10 +29,10 @@ IF
     Else drop 1 100 TDelay
     Then
   Until 
-  t7* close-file throw 
-  t6* close-file throw
-  t1* t2* + z>s 0 fill
-  t3* t4* + z>s 0 fill 
+  t7* close-file throw 0 to t7*
+  t6* close-file throw 0 to t6*
+  t1* z>s 0 fill
+  t3* z>s 0 fill 
   0
 Else 1
 Then
